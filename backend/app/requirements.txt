@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+requests
+fpdf2
+matplotlib
+python-multipart
+python-dotenv
+routeros-api
+
+cd C:\zabbix-dashboard\backend\app
+python app.py
