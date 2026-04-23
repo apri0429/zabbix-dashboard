@@ -37,7 +37,7 @@ except ImportError:
     from mikrotik import get_dhcp_active, get_queue_tree
 
 
-ZABBIX_URL = os.getenv("ZABBIX_URL", "http://localhost/zabbix")
+ZABBIX_URL = os.getenv("ZABBIX_URL", "http://192.168.1.233/zabbix")
 API_TOKEN = os.getenv("ZABBIX_API_TOKEN", "")
 
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
