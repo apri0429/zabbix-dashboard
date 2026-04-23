@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   AppBar,
   Box,
@@ -20,32 +20,32 @@ import MenuOpenIcon from "@mui/icons-material/MenuOpen";
 import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
 import LanRoundedIcon from "@mui/icons-material/LanRounded";
 import WifiRoundedIcon from "@mui/icons-material/WifiRounded";
-import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 
-/* ─── Constants ─── */
-const DRAWER_FULL = 260;
-const DRAWER_COLLAPSED = 72;
-const TOPBAR_H = 72;
-const MOBILE_TOPBAR_H = 120;
-const MOBILE_NAV_H = 78;
+/* ─── Layout constants ─── */
+const DRAWER_FULL = 264;
+const DRAWER_COLLAPSED = 68;
+const TOPBAR_H = 64;
+const MOBILE_TOPBAR_H = 78;
+const MOBILE_NAV_H = 74;
 
-/* ─── Design Tokens ─── */
-const T = {
-  ink: "#233971",
-  ink80: "rgba(35,57,113,0.80)",
-  ink50: "rgba(35,57,113,0.50)",
-  ink20: "rgba(35,57,113,0.20)",
-  ink08: "rgba(35,57,113,0.08)",
-  paper: "#f5f4f0",
-  paper2: "#eeede8",
+/* ─── Palette — based on #233971 ─── */
+const C = {
+  navy: "#233971",
+  navyDeep: "#18284f",
+  blue: "#233971",
+  blueVibrant: "#2d4a9a",
+  blueMid: "#3459c0",
+  accent: "#7ea2ff",
+  accentGlow: "rgba(126,162,255,0.30)",
   white: "#ffffff",
-  accent: "#233971",
-  accentSoft: "rgba(35,57,113,0.12)",
-  accentGlow: "rgba(35,57,113,0.25)",
-  green: "#00c875",
-  greenSoft: "rgba(0,200,117,0.12)",
-  amber: "#f59e0b",
-  red: "#ef4444",
+  offWhite: "#f0f4ff",
+  surface: "#e8eef9",
+  green: "#00d47e",
+  greenGlow: "rgba(0,212,126,0.38)",
+  border: "rgba(255,255,255,0.07)",
+  borderLight: "rgba(35,57,113,0.10)",
+  text: "#233971",
 };
 
 const menuMeta = {
@@ -63,30 +63,92 @@ const menuMeta = {
   },
 };
 
-function getTimeGreeting() {
-  const hour = new Date().getHours();
-  if (hour >= 4 && hour < 11) return "Selamat pagi";
-  if (hour >= 11 && hour < 15) return "Selamat siang";
-  if (hour >= 15 && hour < 18) return "Selamat sore";
-  return "Selamat malam";
-}
-
+/* ─── Global CSS ─── */
 const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  @keyframes glowPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(0,200,117,0.55); }
-    50%       { box-shadow: 0 0 0 5px rgba(0,200,117,0); }
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    background-color: #233971 !important;
   }
-  @keyframes livePulse {
+
+  body {
+    background-color: #233971 !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
-    50%       { opacity: 0.6; transform: scale(1.15); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+  }
+
+  @keyframes navFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-1px); }
+  }
+
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 `;
 
-/* ═══════════════════════════════════════════════
-   SIDEBAR CONTENT
-═══════════════════════════════════════════════ */
+/* ══════════════════════════════════════════
+   LOGO MARK
+══════════════════════════════════════════ */
+function LogoMark({ size = 40, radius = "13px" }) {
+  return (
+    <Box
+      sx={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        background:
+          "linear-gradient(145deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%)",
+        border: `1px solid rgba(255,255,255,0.13)`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        boxShadow:
+          "0 8px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.10)",
+        position: "relative",
+        overflow: "hidden",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: "50%",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 100%)",
+          borderRadius: `${radius} ${radius} 0 0`,
+        },
+      }}
+    >
+      <Box
+        component="img"
+        src="/piagam.png"
+        alt=""
+        sx={{
+          width: size * 0.72,
+          height: size * 0.72,
+          objectFit: "contain",
+          filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.25))",
+          position: "relative",
+          zIndex: 1,
+        }}
+      />
+    </Box>
+  );
+}
+
+/* ══════════════════════════════════════════
+   SIDEBAR CONTENT  (desktop)
+══════════════════════════════════════════ */
 function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
   return (
     <Box
@@ -94,98 +156,39 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        background: T.ink,
+        background: C.blue,
         overflow: "hidden",
         position: "relative",
       }}
     >
-      {/* Noise-texture overlay */}
-      <Box
-        sx={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E")`,
-          opacity: 0.45,
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      />
-      <Box
-        sx={{
-          position: "absolute",
-          bottom: -100,
-          right: -100,
-          width: 260,
-          height: 260,
-          borderRadius: "50%",
-          background: `radial-gradient(circle, ${T.accentGlow} 0%, transparent 68%)`,
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      />
-      <Box
-        sx={{
-          position: "absolute",
-          top: -60,
-          left: -60,
-          width: 180,
-          height: 180,
-          borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)",
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      />
-
-      {/* ── Brand ── */}
       <Box
         sx={{
           position: "relative",
           zIndex: 1,
-          px: isCollapsed ? 1.5 : 2.5,
-          height: `${TOPBAR_H}px`,
+          height: TOPBAR_H,
+          flexShrink: 0,
           display: "flex",
           alignItems: "center",
+          px: isCollapsed ? 1.5 : 2.5,
           gap: 1.5,
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          flexShrink: 0,
-          overflow: "hidden",
+          justifyContent: isCollapsed ? "center" : "flex-start",
+          borderBottom: `1px solid ${C.border}`,
         }}
       >
-        <Box
-          sx={{
-            width: 40,
-            height: 40,
-            borderRadius: "12px",
-            background: `linear-gradient(135deg, ${T.accent} 0%, #5c7cff 100%)`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            position: "relative",
-            overflow: "hidden",
-            boxShadow: `0 6px 20px ${T.accentGlow}`,
-            mx: isCollapsed ? "auto" : 0,
-            "&::after": {
-              content: '""',
-              position: "absolute",
-              inset: 0,
-              background: "linear-gradient(135deg, rgba(255,255,255,0.22) 0%, transparent 60%)",
-            },
-          }}
-        >
-          <WifiRoundedIcon sx={{ fontSize: 20, color: "#ffffff", position: "relative", zIndex: 1 }} />
-        </Box>
+        <LogoMark
+          size={isCollapsed ? 38 : 42}
+          radius={isCollapsed ? "12px" : "14px"}
+        />
         {!isCollapsed && (
-          <Box sx={{ overflow: "hidden", minWidth: 0 }}>
+          <Box sx={{ overflow: "hidden" }}>
             <Typography
               sx={{
-                fontFamily: "'Syne', sans-serif",
-                fontSize: 15,
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: 14.5,
                 fontWeight: 700,
-                color: "#ffffff",
-                letterSpacing: "-0.3px",
-                lineHeight: 1.2,
+                color: C.white,
+                letterSpacing: "-0.2px",
+                lineHeight: 1.15,
                 whiteSpace: "nowrap",
               }}
             >
@@ -193,12 +196,13 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
             </Typography>
             <Typography
               sx={{
-                fontSize: 11,
-                color: "rgba(255,255,255,0.38)",
-                mt: 0.25,
-                whiteSpace: "nowrap",
+                fontSize: 10.5,
                 fontWeight: 400,
-                letterSpacing: "0.02em",
+                color: "rgba(255,255,255,0.32)",
+                letterSpacing: "0.01em",
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+                mt: 0.3,
               }}
             >
               PT Pilar Niaga Makmur
@@ -207,57 +211,13 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
         )}
       </Box>
 
-      {/* ── Status pill ── */}
-      {!isCollapsed && (
-        <Box
-          sx={{
-            position: "relative",
-            zIndex: 1,
-            mx: 2,
-            mt: 1.75,
-            px: 1.75,
-            py: 1.25,
-            borderRadius: "12px",
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            display: "flex",
-            alignItems: "center",
-            gap: 1.25,
-            flexShrink: 0,
-          }}
-        >
-          <FiberManualRecordIcon
-            sx={{ fontSize: 7, color: T.green, animation: "glowPulse 2s ease-in-out infinite" }}
-          />
-          <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: 500, flex: 1 }}>
-            Sistem Aktif
-          </Typography>
-          <Box
-            component="span"
-            sx={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: T.green,
-              background: "rgba(0,200,117,0.12)",
-              border: "1px solid rgba(0,200,117,0.2)",
-              px: 1,
-              py: 0.25,
-              borderRadius: "99px",
-              letterSpacing: "0.04em",
-            }}
-          >
-            Online
-          </Box>
-        </Box>
-      )}
-
-      {/* ── Nav ── */}
       <Box
         sx={{
           position: "relative",
           zIndex: 1,
-          px: isCollapsed ? 1 : 1.5,
-          py: 2,
+          px: isCollapsed ? 1 : 1.75,
+          pt: 2,
+          pb: 1,
           flex: 1,
           overflowY: "auto",
           overflowX: "hidden",
@@ -267,19 +227,22 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
         {!isCollapsed && (
           <Typography
             sx={{
-              px: 1,
-              mb: 1,
+              px: 0.75,
+              mb: 1.25,
               fontSize: 9,
               fontWeight: 700,
-              letterSpacing: "0.14em",
-              color: "rgba(255,255,255,0.22)",
+              letterSpacing: "0.13em",
+              color: "rgba(255,255,255,0.18)",
               textTransform: "uppercase",
             }}
           >
-            Navigasi
+            Menu Utama
           </Typography>
         )}
-        <List sx={{ p: 0, display: "flex", flexDirection: "column", gap: 0.5 }}>
+
+        <List
+          sx={{ p: 0, display: "flex", flexDirection: "column", gap: "3px" }}
+        >
           {menus.map((menu) => {
             const active = currentMenu === menu.key;
             const btn = (
@@ -287,71 +250,90 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
                 key={menu.key}
                 onClick={() => onMenuClick(menu.key)}
                 sx={{
-                  minHeight: 46,
-                  borderRadius: "12px",
-                  px: isCollapsed ? 0 : 1.5,
+                  minHeight: 44,
+                  borderRadius: "11px",
+                  px: isCollapsed ? 0 : 1.25,
                   justifyContent: isCollapsed ? "center" : "flex-start",
-                  color: active ? "#ffffff" : "rgba(255,255,255,0.55)",
-                  background: active
-                    ? "linear-gradient(135deg, rgba(26,63,255,0.22) 0%, rgba(92,124,255,0.14) 100%)"
-                    : "transparent",
-                  border: "1px solid",
-                  borderColor: active ? "rgba(26,63,255,0.30)" : "transparent",
                   position: "relative",
                   overflow: "hidden",
-                  transition: "all 0.18s ease",
+                  transition: "all 0.16s ease",
+                  color: active ? C.white : "rgba(255,255,255,0.42)",
+                  background: active ? alpha(C.white, 0.12) : "transparent",
+                  border: `1px solid ${
+                    active ? alpha(C.white, 0.16) : "transparent"
+                  }`,
                   "&::before": active
                     ? {
                         content: '""',
                         position: "absolute",
                         left: 0,
-                        top: "25%",
-                        bottom: "25%",
-                        width: 3,
-                        background: T.accent,
+                        top: "20%",
+                        bottom: "20%",
+                        width: 2.5,
+                        background: alpha(C.white, 0.72),
                         borderRadius: "0 3px 3px 0",
                       }
                     : {},
                   "&:hover": {
                     background: active
-                      ? "linear-gradient(135deg, rgba(26,63,255,0.26) 0%, rgba(92,124,255,0.18) 100%)"
-                      : "rgba(255,255,255,0.07)",
-                    color: "#ffffff",
-                    borderColor: active ? "rgba(26,63,255,0.36)" : "rgba(255,255,255,0.06)",
+                      ? alpha(C.white, 0.16)
+                      : "rgba(255,255,255,0.08)",
+                    color: C.white,
+                    borderColor: alpha(C.white, active ? 0.2 : 0.08),
                   },
                 }}
               >
                 <ListItemIcon
                   sx={{
-                    minWidth: isCollapsed ? "unset" : 42,
+                    minWidth: isCollapsed ? "unset" : 38,
                     justifyContent: isCollapsed ? "center" : "flex-start",
                   }}
                 >
                   <Box
                     sx={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: "10px",
+                      width: 32,
+                      height: 32,
+                      borderRadius: "9px",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: active ? "rgba(26,63,255,0.30)" : "rgba(255,255,255,0.06)",
-                      transition: "background 0.18s",
-                      color: active ? "#ffffff" : "rgba(255,255,255,0.5)",
+                      background: active
+                        ? alpha(C.white, 0.14)
+                        : "rgba(255,255,255,0.055)",
+                      border: `1px solid ${
+                        active
+                          ? alpha(C.white, 0.18)
+                          : "rgba(255,255,255,0.06)"
+                      }`,
+                      transition: "all 0.16s ease",
+                      color: active ? C.white : "rgba(255,255,255,0.48)",
+                      "& .MuiSvgIcon-root": { fontSize: 15.5 },
                     }}
                   >
                     {menu.icon}
                   </Box>
                 </ListItemIcon>
                 {!isCollapsed && (
-                  <ListItemText
-                    primary={menu.label}
-                    primaryTypographyProps={{
-                      fontSize: 13.5,
-                      fontWeight: active ? 600 : 500,
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  />
+                  <>
+                    <ListItemText
+                      primary={menu.label}
+                      primaryTypographyProps={{
+                        fontSize: 13,
+                        fontWeight: active ? 600 : 500,
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        letterSpacing: "-0.1px",
+                      }}
+                    />
+                    {active && (
+                      <ChevronRightRoundedIcon
+                        sx={{
+                          fontSize: 14,
+                          color: alpha(C.white, 0.35),
+                          ml: "auto",
+                        }}
+                      />
+                    )}
+                  </>
                 )}
               </ListItemButton>
             );
@@ -367,37 +349,36 @@ function SidebarContent({ menus, currentMenu, onMenuClick, isCollapsed }) {
         </List>
       </Box>
 
-      {/* ── Version ── */}
-      {!isCollapsed && (
-        <Box
+      <Box
+        sx={{
+          position: "relative",
+          zIndex: 1,
+          px: 2.5,
+          py: 1.5,
+          borderTop: `1px solid ${C.border}`,
+          flexShrink: 0,
+          display: "flex",
+          justifyContent: isCollapsed ? "center" : "flex-start",
+        }}
+      >
+        <Typography
           sx={{
-            position: "relative",
-            zIndex: 1,
-            px: 2.5,
-            py: 1.75,
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            flexShrink: 0,
+            fontSize: 9.5,
+            color: "rgba(255,255,255,0.14)",
+            fontFamily: "'JetBrains Mono', monospace",
+            letterSpacing: "0.04em",
           }}
         >
-          <Typography
-            sx={{
-              fontSize: 10,
-              color: "rgba(255,255,255,0.2)",
-              textAlign: "center",
-              fontFamily: "'JetBrains Mono', monospace",
-            }}
-          >
-            v2.4.1 · Zabbix API
-          </Typography>
-        </Box>
-      )}
+          {isCollapsed ? "v2.4" : "v2.4.1 · Network Dashboard"}
+        </Typography>
+      </Box>
     </Box>
   );
 }
 
-/* ═══════════════════════════════════════════════
+/* ══════════════════════════════════════════
    MOBILE BOTTOM NAV
-═══════════════════════════════════════════════ */
+══════════════════════════════════════════ */
 function MobileBottomNav({ menus, currentMenu, onMenuClick }) {
   return (
     <Box
@@ -405,99 +386,183 @@ function MobileBottomNav({ menus, currentMenu, onMenuClick }) {
         position: "fixed",
         left: 14,
         right: 14,
-        bottom: 14,
-        zIndex: (theme) => theme.zIndex.appBar + 2,
+        bottom: 12,
+        zIndex: 1200,
         display: { xs: "block", md: "none" },
+        borderRadius: "24px",
+        background:
+          "linear-gradient(180deg, rgba(49,74,137,0.96) 0%, rgba(35,57,113,0.98) 100%)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        boxShadow:
+          "0 20px 44px rgba(12,22,50,0.34), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(255,255,255,0.03)",
+        overflow: "hidden",
+        pb: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
       }}
     >
       <Box
         sx={{
-          borderRadius: "26px",
-          px: 0.75,
-          py: 0.75,
-          background: T.accent,
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          border: "1px solid rgba(255,255,255,0.10)",
-          boxShadow: `0 16px 40px ${alpha(T.ink, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.08)`,
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background: `
+            radial-gradient(circle at 18% 18%, rgba(255,255,255,0.12) 0%, transparent 26%),
+            radial-gradient(circle at 82% 30%, rgba(126,162,255,0.14) 0%, transparent 28%),
+            linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 40%, rgba(255,255,255,0.03) 100%)
+          `,
+        }}
+      />
+
+      <Box
+        sx={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          opacity: 0.18,
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='120' viewBox='0 0 320 120'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.22' stroke-width='1.1'%3E%3Cpath d='M-20 85C15 62 42 62 77 85S138 108 173 85s61-23 96 0 61 23 96 0'/%3E%3Cpath d='M-10 45C25 22 52 22 87 45S148 68 183 45s61-23 96 0 61 23 96 0'/%3E%3C/g%3E%3C/svg%3E\")",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      />
+
+      <Box
+        sx={{
+          position: "relative",
+          display: "grid",
+          gridTemplateColumns: `repeat(${menus.length}, 1fr)`,
+          minHeight: MOBILE_NAV_H,
+          px: 0.9,
+          pt: 0.9,
         }}
       >
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${menus.length}, minmax(0, 1fr))`,
-            gap: 0.75,
-          }}
-        >
-          {menus.map((menu) => {
-            const active = currentMenu === menu.key;
-            return (
+        {menus.map((menu) => {
+          const active = currentMenu === menu.key;
+
+          return (
+            <Box
+              key={menu.key}
+              component="button"
+              type="button"
+              onClick={() => onMenuClick(menu.key)}
+              sx={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 0.55,
+                minHeight: 58,
+                px: 0.3,
+                borderRadius: "18px",
+                color: active ? C.white : "rgba(255,255,255,0.62)",
+                transition: "all 0.22s ease",
+                WebkitAppearance: "none",
+                appearance: "none",
+                WebkitTapHighlightColor: "transparent",
+                outline: "none",
+                "&:active": {
+                  transform: "scale(0.98)",
+                },
+              }}
+            >
+              {active && (
+                <>
+                  <Box
+                    sx={{
+                      position: "absolute",
+                      inset: "4px 4px 2px 4px",
+                      borderRadius: "18px",
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.08) 100%)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.10), 0 10px 22px rgba(6,14,34,0.20)",
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      position: "absolute",
+                      top: 5,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: 26,
+                      height: 3,
+                      borderRadius: "999px",
+                      background: "rgba(255,255,255,0.95)",
+                      boxShadow: "0 0 12px rgba(255,255,255,0.30)",
+                    }}
+                  />
+                </>
+              )}
+
               <Box
-                key={menu.key}
-                component="button"
-                type="button"
-                onClick={() => onMenuClick(menu.key)}
                 sx={{
-                  minWidth: 0,
-                  px: 0.75,
-                  py: 0.8,
-                  width: "100%",
-                  borderRadius: "16px",
-                  cursor: "pointer",
+                  position: "relative",
+                  zIndex: 1,
+                  width: active ? 36 : 34,
+                  height: active ? 36 : 34,
+                  borderRadius: "13px",
                   display: "flex",
-                  flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 0.45,
-                  border: "none",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  color: active ? T.white : "rgba(255,255,255,0.58)",
                   background: active
-                    ? "linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.10) 100%)"
-                    : "transparent",
-                  outline: active ? "1px solid rgba(255,255,255,0.16)" : "1px solid transparent",
-                  boxShadow: active ? `0 8px 18px ${alpha("#091227", 0.18)}` : "none",
-                  transition: "all 0.18s ease",
-                  "&:active": { transform: "scale(0.97)" },
+                    ? "linear-gradient(180deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.04) 100%)"
+                    : "rgba(255,255,255,0.04)",
+                  border: active
+                    ? "1px solid rgba(255,255,255,0.12)"
+                    : "1px solid rgba(255,255,255,0.05)",
+                  boxShadow: active
+                    ? "0 8px 18px rgba(7,15,37,0.16)"
+                    : "none",
+                  transition: "all 0.22s ease",
+                  animation: active ? "navFloat 3s ease-in-out infinite" : "none",
+                  "& .MuiSvgIcon-root": {
+                    fontSize: active ? 18.5 : 18,
+                    filter: active
+                      ? "drop-shadow(0 2px 7px rgba(126,162,255,0.32))"
+                      : "none",
+                    transition: "all 0.22s ease",
+                  },
                 }}
               >
-                <Box
-                  sx={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: active ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)",
-                  }}
-                >
-                  {menu.icon}
-                </Box>
-                <Typography
-                  sx={{
-                    fontSize: 10,
-                    lineHeight: 1.15,
-                    fontWeight: active ? 700 : 500,
-                    textAlign: "center",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {menu.label}
-                </Typography>
+                {menu.icon}
               </Box>
-            );
-          })}
-        </Box>
+
+              <Typography
+                sx={{
+                  position: "relative",
+                  zIndex: 1,
+                  fontSize: active ? 9.2 : 8.9,
+                  fontWeight: active ? 700 : 600,
+                  lineHeight: 1,
+                  color: "inherit",
+                  whiteSpace: "nowrap",
+                  letterSpacing: "0.01em",
+                  transition: "all 0.2s ease",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  textShadow: active
+                    ? "0 1px 10px rgba(0,0,0,0.18)"
+                    : "none",
+                }}
+              >
+                {menu.label}
+              </Typography>
+            </Box>
+          );
+        })}
       </Box>
     </Box>
   );
 }
 
-/* ═══════════════════════════════════════════════
+/* ══════════════════════════════════════════
    LAYOUT
-═══════════════════════════════════════════════ */
+══════════════════════════════════════════ */
 export default function Layout({
   children,
   title = "Dashboard",
@@ -506,6 +571,7 @@ export default function Layout({
 }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+
   const [collapsed, setCollapsed] = useState(false);
 
   const isCollapsed = !isMobile && collapsed;
@@ -517,33 +583,61 @@ export default function Layout({
 
   const menus = useMemo(
     () => [
-      { key: "dashboard", label: "Dashboard", icon: <DashboardRoundedIcon sx={{ fontSize: 17 }} /> },
-      { key: "user-active", label: "User Active", icon: <LanRoundedIcon sx={{ fontSize: 17 }} /> },
-      { key: "live-bandwidth", label: "Live Bandwidth", icon: <WifiRoundedIcon sx={{ fontSize: 17 }} /> },
+      {
+        key: "dashboard",
+        label: "Dashboard",
+        subtitle: "Kondisi jaringan",
+        icon: <DashboardRoundedIcon />,
+      },
+      {
+        key: "user-active",
+        label: "User Active",
+        subtitle: "DHCP aktif",
+        icon: <LanRoundedIcon />,
+      },
+      {
+        key: "live-bandwidth",
+        label: "Bandwidth",
+        subtitle: "Realtime monitoring",
+        icon: <WifiRoundedIcon />,
+      },
     ],
     []
   );
 
-  const handleDrawerToggle = () => {
-    if (!isMobile) setCollapsed((p) => !p);
-  };
-
-  const handleMenuClick = (key) => {
-    if (onMenuChange) onMenuChange(key);
-  };
+  const handleMenuClick = useCallback(
+    (key) => {
+      if (onMenuChange) onMenuChange(key);
+    },
+    [onMenuChange]
+  );
 
   const meta = menuMeta[currentMenu] || {};
-  const greeting = getTimeGreeting();
-  const currentMenuLabel = menus.find((menu) => menu.key === currentMenu)?.label || title;
 
   useEffect(() => {
-    let themeColorMeta = document.querySelector('meta[name="theme-color"]');
-    if (!themeColorMeta) {
-      themeColorMeta = document.createElement("meta");
-      themeColorMeta.setAttribute("name", "theme-color");
-      document.head.appendChild(themeColorMeta);
-    }
-    themeColorMeta.setAttribute("content", "#1a2f6b");
+    document.querySelectorAll('meta[name="theme-color"]').forEach((el) =>
+      el.remove()
+    );
+    const m = document.createElement("meta");
+    m.setAttribute("name", "theme-color");
+    m.setAttribute("content", C.blue);
+    document.head.appendChild(m);
+    document
+      .querySelectorAll('meta[name="apple-mobile-web-app-status-bar-style"]')
+      .forEach((el) => el.remove());
+    const appleStatusBar = document.createElement("meta");
+    appleStatusBar.setAttribute(
+      "name",
+      "apple-mobile-web-app-status-bar-style"
+    );
+    appleStatusBar.setAttribute("content", "default");
+    document.head.appendChild(appleStatusBar);
+    document.documentElement.style.backgroundColor = C.blue;
+    document.body.style.backgroundColor = C.blue;
+    return () => {
+      document.documentElement.style.backgroundColor = "";
+      document.body.style.backgroundColor = "";
+    };
   }, []);
 
   return (
@@ -554,362 +648,318 @@ export default function Layout({
         sx={{
           display: "flex",
           minHeight: "100vh",
-          fontFamily: "'DM Sans', sans-serif",
-          background: T.paper,
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+          backgroundColor: "#dfe7f8",
           position: "relative",
           overflow: "hidden",
-
-          /* background utama lebih jelas */
           backgroundImage: `
-            radial-gradient(circle at 12% 26%, rgba(244, 235, 223, 0.96) 0%, rgba(244, 235, 223, 0.72) 10%, transparent 20%),
-            radial-gradient(circle at 78% 18%, rgba(198, 220, 247, 0.88) 0%, rgba(198, 220, 247, 0.42) 11%, transparent 23%),
-            radial-gradient(circle at 84% 70%, rgba(244, 235, 223, 0.82) 0%, rgba(244, 235, 223, 0.30) 13%, transparent 27%),
-            linear-gradient(180deg, #f9fbfe 0%, #eef3f8 100%)
+            radial-gradient(1500px 520px at 50% -6%, rgba(35,57,113,0.16) 0%, rgba(35,57,113,0.08) 28%, transparent 68%),
+            radial-gradient(1200px 520px at -10% 18%, rgba(45,74,154,0.12) 0%, rgba(45,74,154,0.06) 30%, transparent 72%),
+            radial-gradient(1200px 520px at 110% 16%, rgba(52,89,192,0.10) 0%, rgba(52,89,192,0.05) 30%, transparent 72%),
+            radial-gradient(900px 320px at 50% 24%, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.12) 36%, transparent 76%),
+            linear-gradient(180deg, #d8e2f3 0%, #e8eef8 22%, #edf2fa 48%, #dfe7f6 100%)
           `,
-
           "&::before": {
             content: '""',
             position: "absolute",
             inset: 0,
             pointerEvents: "none",
             zIndex: 0,
-            backgroundImage: `radial-gradient(rgba(104, 138, 188, 0.20) 1.15px, transparent 1.15px)`,
-            backgroundSize: { xs: "16px 16px", md: "18px 18px" },
-            opacity: 0.42,
-          },
-
-          "&::after": {
-            content: '""',
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            zIndex: 0,
-            background: `
-              radial-gradient(ellipse 43% 16% at 8% 100%, rgba(236, 227, 214, 0.96) 0%, rgba(236, 227, 214, 0.64) 42%, rgba(236, 227, 214, 0.18) 52%, transparent 53%),
-              radial-gradient(ellipse 48% 18% at 82% 100%, rgba(204, 214, 227, 0.96) 0%, rgba(204, 214, 227, 0.68) 44%, rgba(204, 214, 227, 0.18) 56%, transparent 57%),
-              linear-gradient(170deg, transparent 0%, transparent 26%, rgba(191, 205, 224, 0.62) 26.5%, rgba(191, 205, 224, 0.62) 34%, transparent 34.5%)
+            opacity: 0.5,
+            backgroundImage: `
+              url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1800' height='1200' viewBox='0 0 1800 1200'%3E%3Cg fill='none' stroke='%23233971' stroke-opacity='0.24' stroke-width='2.2'%3E%3Cpath d='M-180 180C40 40 220 40 440 180S840 320 1060 180s400-140 620 0 400 140 620 0'/%3E%3Cpath d='M-180 360C40 220 220 220 440 360S840 500 1060 360s400-140 620 0 400 140 620 0'/%3E%3Cpath d='M-180 540C40 400 220 400 440 540S840 680 1060 540s400-140 620 0 400 140 620 0'/%3E%3Cpath d='M-180 720C40 580 220 580 440 720S840 860 1060 720s400-140 620 0 400 140 620 0'/%3E%3C/g%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.18' stroke-width='1.4'%3E%3Cellipse cx='320' cy='230' rx='180' ry='66'/%3E%3Cellipse cx='900' cy='170' rx='250' ry='88'/%3E%3Cellipse cx='1480' cy='280' rx='190' ry='70'/%3E%3C/g%3E%3C/svg%3E")
             `,
+            backgroundSize: "cover",
+            backgroundPosition: "center top",
+            mixBlendMode: "multiply",
           },
         }}
       >
         <CssBaseline />
 
-        {/* dekorasi background tambahan supaya lebih kelihatan */}
-        <Box
-          sx={{
-            position: "absolute",
-            top: { xs: 126, md: 132 },
-            right: { xs: 18, md: 88 },
-            width: { xs: 112, md: 220 },
-            height: { xs: 62, md: 92 },
-            opacity: 0.40,
-            pointerEvents: "none",
-            backgroundImage: `radial-gradient(rgba(111, 145, 196, 0.95) 1.8px, transparent 1.8px)`,
-            backgroundSize: "16px 16px",
-            zIndex: 0,
-          }}
-        />
-
-        <Box
-          sx={{
-            position: "absolute",
-            top: { xs: -112, md: -145 },
-            left: { xs: -150, md: -260 },
-            width: { xs: 440, md: 760 },
-            height: { xs: 220, md: 320 },
-            borderRadius: "0 0 999px 999px",
-            background: "rgba(210, 219, 232, 0.72)",
-            transform: "rotate(-6deg)",
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        />
-
-        <Box
-          sx={{
-            position: "absolute",
-            top: { xs: -30, md: -46 },
-            left: { xs: "24%", md: "25%" },
-            width: { xs: 300, md: 620 },
-            height: { xs: 120, md: 220 },
-            borderRadius: "0 0 180px 180px",
-            background: "rgba(186, 201, 223, 0.48)",
-            transform: "rotate(-10deg)",
-            pointerEvents: "none",
-            filter: "blur(0.5px)",
-            zIndex: 0,
-          }}
-        />
-
-        <Box
-          sx={{
-            position: "absolute",
-            top: { xs: 82, md: 92 },
-            left: { xs: -90, md: -145 },
-            width: { xs: 360, md: 620 },
-            height: { xs: 140, md: 205 },
-            borderRadius: "999px",
-            background: "rgba(220, 226, 236, 0.58)",
-            transform: "rotate(-8deg)",
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        />
-
-        <Box
-          sx={{
-            position: "absolute",
-            bottom: { xs: -40, md: -30 },
-            left: { xs: -60, md: -90 },
-            width: { xs: 340, md: 480 },
-            height: { xs: 150, md: 220 },
-            borderRadius: "50%",
-            border: "18px solid rgba(236, 227, 214, 0.95)",
-            opacity: 0.85,
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        />
-
-        <Box
-          sx={{
-            position: "absolute",
-            bottom: { xs: -80, md: -40 },
-            right: { xs: -120, md: -150 },
-            width: { xs: 420, md: 760 },
-            height: { xs: 180, md: 260 },
-            borderRadius: "50%",
-            background: "linear-gradient(180deg, rgba(206,215,227,0.76) 0%, rgba(206,215,227,0.98) 100%)",
-            opacity: 0.95,
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        />
-
-        {/* ── AppBar ── */}
         <AppBar
           position="fixed"
           elevation={0}
           sx={{
+            top: 0,
+            left: 0,
+            right: 0,
             width: { md: `calc(100% - ${drawerWidth}px)` },
             ml: { md: `${drawerWidth}px` },
-            height: { xs: `${MOBILE_TOPBAR_H}px`, md: `${TOPBAR_H}px` },
-            background: {
-              xs: T.accent,
-              md: `linear-gradient(180deg, ${alpha(T.accent, 0.14)} 0%, ${alpha("#ffffff", 0.92)} 82%)`,
+            height: {
+              xs: `calc(${MOBILE_TOPBAR_H}px + env(safe-area-inset-top, 0px))`,
+              md: `${TOPBAR_H}px`,
             },
-            backdropFilter: { xs: "none", md: "blur(20px)" },
-            WebkitBackdropFilter: { xs: "none", md: "blur(20px)" },
+            backgroundColor: C.blue,
+            backgroundImage:
+              "linear-gradient(180deg, rgba(44,69,132,1) 0%, rgba(35,57,113,1) 58%, rgba(28,46,92,1) 100%)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
             borderRadius: 0,
-            overflow: "visible",
-            color: { xs: T.white, md: T.accent },
-            transition: "width 0.28s cubic-bezier(0.4,0,0.2,1), margin 0.28s cubic-bezier(0.4,0,0.2,1)",
-            boxShadow: "none",
-
-            /* lengkungan mobile — background mengikuti tema halaman */
-            "&::before": {
-              content: '""',
-              display: { xs: "block", md: "none" },
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: -1,
-              height: 30,
-              background: "linear-gradient(180deg, #f9fbfe 0%, #eef3f8 100%)",
-              backgroundImage: `
-                radial-gradient(circle at 12% 50%, rgba(244, 235, 223, 0.96) 0%, rgba(244, 235, 223, 0.72) 30%, transparent 60%),
-                radial-gradient(circle at 88% 50%, rgba(198, 220, 247, 0.88) 0%, rgba(198, 220, 247, 0.42) 30%, transparent 60%),
-                linear-gradient(180deg, #f9fbfe 0%, #eef3f8 100%)
-              `,
-              borderTopLeftRadius: "24px",
-              borderTopRightRadius: "24px",
-              zIndex: 0,
+            overflow: "hidden",
+            color: C.white,
+            transition:
+              "width 0.28s cubic-bezier(0.4,0,0.2,1), margin 0.28s cubic-bezier(0.4,0,0.2,1)",
+            boxShadow: {
+              xs: "0 2px 0 rgba(255,255,255,0.05), 0 10px 28px rgba(15,25,55,0.24)",
+              md: "0 2px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(15,25,55,0.12)",
             },
             "&::after": {
               content: '""',
-              display: { xs: "none", md: "none" },
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              opacity: 0.26,
+              backgroundImage:
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='260' viewBox='0 0 1600 260'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.30' stroke-width='1.2'%3E%3Cpath d='M-80 110C70 35 180 35 330 110S590 185 740 110s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3Cpath d='M-80 190C70 115 180 115 330 190S590 265 740 190s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3C/g%3E%3C/svg%3E\")",
+              backgroundSize: "cover",
+              backgroundPosition: "center",
             },
           }}
         >
-          {/* ════ DESKTOP TOOLBAR — identik 100% dengan asli ════ */}
           <Toolbar
             sx={{
               display: { xs: "none", md: "flex" },
-              height: `${TOPBAR_H}px`,
+              height: TOPBAR_H,
               minHeight: `${TOPBAR_H}px !important`,
-              px: 3.5,
+              px: 3,
               gap: 2,
-            }}
-          >
-            <IconButton
-              onClick={handleDrawerToggle}
-              size="small"
-              sx={{
-                width: 38,
-                height: 38,
-                borderRadius: "10px",
-                border: `1px solid ${alpha(T.accent, 0.16)}`,
-                background: `linear-gradient(180deg, ${alpha(T.white, 0.96)} 0%, ${alpha(T.accent, 0.06)} 100%)`,
-                color: T.accent,
-                flexShrink: 0,
-                boxShadow: `0 6px 18px ${alpha(T.accent, 0.10)}`,
-                transition: "all 0.15s ease",
-                "&:hover": { background: T.accent, borderColor: T.accent, color: T.white },
-              }}
-            >
-              {collapsed ? <MenuIcon fontSize="small" /> : <MenuOpenIcon fontSize="small" />}
-            </IconButton>
-
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography
-                sx={{
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: 20,
-                  fontWeight: 700,
-                  color: T.accent,
-                  letterSpacing: "-0.4px",
-                  lineHeight: 1.2,
-                }}
-              >
-                {meta.title || title}
-              </Typography>
-              <Typography sx={{ fontSize: 12, color: alpha(T.accent, 0.72), mt: 0.25, lineHeight: 1.3 }}>
-                {meta.subtitle || ""}
-              </Typography>
-            </Box>
-
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 0.75,
-                px: 1.75,
-                py: 1,
-                borderRadius: "99px",
-                border: `1px solid ${T.ink08}`,
-                background: T.white,
-                boxShadow: "0 2px 8px rgba(10,14,26,0.05)",
-              }}
-            >
-              <Box
-                component="svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                sx={{ width: 13, height: 13, stroke: alpha(T.accent, 0.72), strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}
-              >
-                <rect x="3" y="4" width="18" height="18" rx="2" />
-                <line x1="16" y1="2" x2="16" y2="6" />
-                <line x1="8" y1="2" x2="8" y2="6" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-              </Box>
-              <Typography sx={{ fontSize: 12, fontWeight: 600, color: alpha(T.accent, 0.84) }}>
-                {new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
-              </Typography>
-            </Box>
-
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
-                px: 1.75,
-                py: 1,
-                borderRadius: "99px",
-                background: `linear-gradient(180deg, ${alpha(T.accent, 0.96)} 0%, ${alpha("#1b2d5b", 0.96)} 100%)`,
-                color: T.white,
-                boxShadow: `0 8px 22px ${alpha(T.accent, 0.30)}`,
-                border: `1px solid ${alpha(T.white, 0.10)}`,
-              }}
-            >
-              <FiberManualRecordIcon sx={{ fontSize: 7, color: "#9fc0ff", animation: "livePulse 2s ease-in-out infinite" }} />
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.white }}>Live</Typography>
-            </Box>
-          </Toolbar>
-
-          {/* ════ MOBILE TOOLBAR — rapi, satu baris ════ */}
-          <Toolbar
-            disableGutters
-            sx={{
-              display: { xs: "flex", md: "none" },
-              height: `${MOBILE_TOPBAR_H}px`,
-              minHeight: `${MOBILE_TOPBAR_H}px !important`,
-              px: 2.5,
-              pt: "max(env(safe-area-inset-top), 12px)",
-              pb: "22px",
-              alignItems: "center",
-              gap: 1.5,
               position: "relative",
               zIndex: 1,
             }}
           >
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography
+            <IconButton
+              onClick={() => setCollapsed((p) => !p)}
+              size="small"
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: "10px",
+                border: `1px solid ${alpha(C.white, 0.12)}`,
+                background: alpha(C.white, 0.06),
+                color: alpha(C.white, 0.86),
+                flexShrink: 0,
+                transition: "all 0.16s ease",
+                "&:hover": {
+                  background: alpha(C.white, 0.12),
+                  color: C.white,
+                  borderColor: alpha(C.white, 0.18),
+                },
+              }}
+            >
+              {collapsed ? (
+                <MenuIcon sx={{ fontSize: 17 }} />
+              ) : (
+                <MenuOpenIcon sx={{ fontSize: 17 }} />
+              )}
+            </IconButton>
+
+            <Box
+              sx={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 2,
+              }}
+            >
+              <Box sx={{ minWidth: 0 }}>
+                <Typography
+                  sx={{
+                    fontFamily: "'Outfit', sans-serif",
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: C.white,
+                    letterSpacing: "-0.4px",
+                    lineHeight: 1.15,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {meta.title || title}
+                </Typography>
+                {meta.subtitle && (
+                  <Typography
+                    sx={{
+                      fontSize: 11,
+                      color: alpha(C.white, 0.56),
+                      mt: 0.35,
+                      lineHeight: 1,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {meta.subtitle}
+                  </Typography>
+                )}
+              </Box>
+
+              <Box
                 sx={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: alpha(T.white, 0.6),
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  lineHeight: 1,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
                 }}
               >
-                {greeting}
-              </Typography>
-              <Typography
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 0.7,
+                    px: 1.2,
+                    py: 0.72,
+                    borderRadius: "999px",
+                    background: alpha(C.white, 0.07),
+                    border: `1px solid ${alpha(C.white, 0.10)}`,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: C.green,
+                      boxShadow: `0 0 10px ${C.greenGlow}`,
+                      animation: "pulse 2.4s ease-in-out infinite",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: C.white,
+                      lineHeight: 1,
+                      letterSpacing: "0.01em",
+                    }}
+                  >
+                    Live Monitoring
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          </Toolbar>
+
+          <Toolbar
+            disableGutters
+            sx={{
+              display: { xs: "flex", md: "none" },
+              height: "100%",
+              minHeight: "unset !important",
+              flexDirection: "column",
+              alignItems: "stretch",
+              px: 0,
+              pb: 0,
+              position: "relative",
+              zIndex: 2,
+              overflow: "visible",
+              background:
+                "linear-gradient(180deg, rgba(44,69,132,1) 0%, rgba(35,57,113,1) 58%, rgba(28,46,92,1) 100%)",
+              pt: "env(safe-area-inset-top, 0px)",
+            }}
+          >
+            <Box
+              sx={{
+                px: 2,
+                pt: 0.95,
+                pb: 0.95,
+                display: "flex",
+                alignItems: "center",
+                gap: 1.1,
+                minHeight: MOBILE_TOPBAR_H,
+              }}
+            >
+              <LogoMark size={50} radius="14px" />
+
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  sx={{
+                    fontFamily: "'Outfit', sans-serif",
+                    fontSize: 17,
+                    fontWeight: 700,
+                    color: C.white,
+                    lineHeight: 1.1,
+                    letterSpacing: "-0.02em",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {meta.title || title}
+                </Typography>
+
+                {meta.subtitle && (
+                  <Typography
+                    sx={{
+                      mt: 0.35,
+                      fontSize: 10.5,
+                      fontWeight: 500,
+                      color: alpha(C.white, 0.62),
+                      lineHeight: 1.2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {meta.subtitle}
+                  </Typography>
+                )}
+              </Box>
+
+              <Box
                 sx={{
-                  mt: 0.5,
-                  fontFamily: "'Syne', sans-serif",
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: T.white,
-                  lineHeight: 1.15,
-                  letterSpacing: "-0.04em",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  px: 0.9,
+                  py: 0.5,
+                  borderRadius: "999px",
+                  background: alpha(C.white, 0.08),
+                  border: `1px solid ${alpha(C.white, 0.10)}`,
+                  flexShrink: 0,
                 }}
               >
-                {meta.title || title}
-              </Typography>
-              <Typography
-                sx={{
-                  mt: 0.35,
-                  fontSize: 11,
-                  color: alpha(T.white, 0.5),
-                  lineHeight: 1.3,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {meta.subtitle || ""}
-              </Typography>
+                <Box
+                  sx={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: C.green,
+                    boxShadow: `0 0 8px ${C.greenGlow}`,
+                    animation: "pulse 2.4s ease-in-out infinite",
+                    flexShrink: 0,
+                  }}
+                />
+                <Typography
+                  sx={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: C.white,
+                    lineHeight: 1,
+                  }}
+                >
+                  Live
+                </Typography>
+              </Box>
             </Box>
 
             <Box
               sx={{
+                height: "1px",
                 flexShrink: 0,
-                display: "flex",
-                alignItems: "center",
-                gap: 0.75,
-                px: 1.4,
-                py: 0.85,
-                borderRadius: "99px",
-                background: alpha(T.white, 0.13),
-                border: `1px solid ${alpha(T.white, 0.14)}`,
+                background: `linear-gradient(90deg, transparent, ${alpha(
+                  C.white,
+                  0.16
+                )} 25%, ${alpha(C.white, 0.16)} 75%, transparent)`,
               }}
-            >
-              <FiberManualRecordIcon
-                sx={{ fontSize: 7, color: T.green, animation: "livePulse 2s ease-in-out infinite" }}
-              />
-              <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.white, whiteSpace: "nowrap" }}>
-                {currentMenuLabel}
-              </Typography>
-            </Box>
+            />
           </Toolbar>
         </AppBar>
 
-        {/* ── Drawer nav ── */}
         <Box
           component="nav"
           sx={{
@@ -928,7 +978,8 @@ export default function Layout({
                   border: "none",
                   transition: "width 0.28s cubic-bezier(0.4,0,0.2,1)",
                   overflowX: "hidden",
-                  boxShadow: "8px 0 32px rgba(10,14,26,0.12)",
+                  boxShadow:
+                    "1px 0 0 rgba(255,255,255,0.04), 8px 0 24px rgba(15,25,55,0.10)",
                 },
               }}
             >
@@ -942,7 +993,6 @@ export default function Layout({
           )}
         </Box>
 
-        {/* ── Main area ── */}
         <Box
           component="main"
           sx={{
@@ -954,16 +1004,20 @@ export default function Layout({
             transition: "all 0.28s cubic-bezier(0.4,0,0.2,1)",
           }}
         >
-          {/* Spacer for fixed appbar */}
-          <Box sx={{ height: { xs: `${MOBILE_TOPBAR_H}px`, md: `${TOPBAR_H}px` }, flexShrink: 0 }} />
+          <Box
+            sx={{
+              height: {
+                xs: `calc(${MOBILE_TOPBAR_H}px + env(safe-area-inset-top, 0px))`,
+                md: `${TOPBAR_H}px`,
+              },
+              flexShrink: 0,
+            }}
+          />
 
-          {/* Page content */}
           <Box
             sx={{
               flex: 1,
               p: { xs: 2, md: 3.5 },
-              pb: { xs: 2, md: 3.5 },
-              mt: { xs: "-6px", md: 0 },
               position: "relative",
               zIndex: 1,
             }}
@@ -971,31 +1025,37 @@ export default function Layout({
             {children}
           </Box>
 
-          {/* Footer */}
           <Box
             component="footer"
             sx={{
               px: { xs: 2, md: 3.5 },
-              pb: { xs: `calc(${MOBILE_NAV_H}px + 20px)`, md: 3 },
+              pb: {
+                xs: `calc(${MOBILE_NAV_H}px + env(safe-area-inset-bottom, 0px) + 28px)`,
+                md: 3,
+              },
             }}
           >
             <Box
               sx={{
-                borderTop: `1px solid ${T.ink08}`,
+                borderTop: `1px solid ${C.borderLight}`,
                 pt: 2,
-                display: "flex",
+                display: { xs: "none", md: "flex" },
                 justifyContent: "center",
-                alignItems: "center",
               }}
             >
               <Typography
                 sx={{
-                  display: { xs: "none", md: "block" },
-                  fontSize: 11,
-                  color: T.ink50,
-                  textAlign: "center",
-                  fontWeight: 500,
-                  letterSpacing: "0.02em",
+                  fontSize: 11.5,
+                  color: alpha(C.text, 0.55),
+                  fontWeight: 600,
+                  letterSpacing: "0.03em",
+                  px: 1.5,
+                  py: 0.75,
+                  borderRadius: "99px",
+                  background: alpha(C.white, 0.55),
+                  border: `1px solid ${alpha(C.text, 0.08)}`,
+                  backdropFilter: "blur(8px)",
+                  WebkitBackdropFilter: "blur(8px)",
                 }}
               >
                 Network Dashboard · PT Pilar Niaga Makmur
@@ -1004,7 +1064,11 @@ export default function Layout({
           </Box>
         </Box>
 
-        <MobileBottomNav menus={menus} currentMenu={currentMenu} onMenuClick={handleMenuClick} />
+        <MobileBottomNav
+          menus={menus}
+          currentMenu={currentMenu}
+          onMenuClick={handleMenuClick}
+        />
       </Box>
     </>
   );

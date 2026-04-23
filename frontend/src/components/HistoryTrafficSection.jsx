@@ -165,7 +165,6 @@ const PillBtn = ({ active, onClick, children, activeColor = C.accent }) => (
 
 // ─── Router Chip ─────────────────────────────────────────────────────────────
 const RouterChip = ({ host, index, isActive, avgDl, onSelect }) => {
-  const color = HOST_COLORS[index % HOST_COLORS.length];
   const clean = shortLabel(host);
   const init = makeInitials(host);
 
@@ -175,63 +174,94 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect }) => {
       style={{
         display: "flex", flexDirection: "column", alignItems: "center",
         width: "100%",
-        minHeight: 132,
-        padding: "14px 12px 12px",
-        borderRadius: 18,
-        border: `1.5px solid ${isActive ? color : C.border}`,
-        background: isActive ? color + "0f" : C.surface,
+        minHeight: 130,
+        padding: "16px 12px 14px",
+        borderRadius: 16,
+        border: `1.5px solid ${isActive ? "rgba(35,57,113,0.35)" : "rgba(35,57,113,0.12)"}`,
+        background: isActive
+          ? "linear-gradient(145deg, #233971 0%, #1c2e5a 60%, #0f1e40 100%)"
+          : "linear-gradient(145deg, #f6f8fd 0%, #eef2fb 100%)",
         cursor: "pointer",
-        transition: "all 0.18s",
+        transition: "all 0.20s ease",
         WebkitTapHighlightColor: "transparent",
         position: "relative",
         justifyContent: "flex-start",
+        overflow: "hidden",
+        boxShadow: isActive
+          ? "0 4px 16px rgba(35,57,113,0.22)"
+          : "0 1px 3px rgba(35,57,113,0.08)",
       }}
     >
+      {/* Top accent bar (inactive) */}
+      {!isActive && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, height: 3,
+          borderRadius: "16px 16px 0 0",
+          background: "linear-gradient(90deg, #233971 0%, #3d5ca8 100%)",
+          opacity: 0.45,
+          pointerEvents: "none",
+        }} />
+      )}
+      {/* Background icon watermark (inactive) */}
+      {!isActive && (
+        <svg width="58" height="58" viewBox="0 0 24 24" fill="none"
+          stroke={C.accent} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ position: "absolute", bottom: -6, right: -6, opacity: 0.055, pointerEvents: "none" }}>
+          <rect x="2" y="9" width="20" height="6" rx="2" />
+          <path d="M6 12h.01M10 12h.01" />
+          <path d="M7 4v5M17 4v5" />
+          <path d="M7 15v5M17 15v5" />
+        </svg>
+      )}
+
+      {/* Avatar */}
       <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, height: 3,
-        borderRadius: "18px 18px 0 0",
-        background: isActive ? color : color + "30",
-      }} />
-      <div style={{
-        width: 40, height: 40, borderRadius: "50%",
-        background: isActive ? color : color + "20",
+        width: 42, height: 42, borderRadius: "50%",
+        background: isActive ? "rgba(255,255,255,0.16)" : "rgba(35,57,113,0.10)",
+        border: isActive ? "1.5px solid rgba(255,255,255,0.28)" : "1.5px solid rgba(35,57,113,0.20)",
         display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 13, fontWeight: 700,
-        color: isActive ? "#fff" : color,
-        marginBottom: 8, marginTop: 4,
+        color: isActive ? "#ffffff" : C.accent,
+        marginBottom: 10, marginTop: isActive ? 4 : 7,
+        flexShrink: 0,
       }}>
         {init}
       </div>
+
+      {/* Name */}
       <div style={{
-        fontSize: 10, fontWeight: 700,
-        color: isActive ? color : C.textSecondary,
+        fontSize: 10.5, fontWeight: 700,
+        color: isActive ? "rgba(255,255,255,0.90)" : C.accent,
         textAlign: "center", lineHeight: 1.35,
         wordBreak: "break-word", maxWidth: "100%",
-        minHeight: 30,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        minHeight: 28,
+        display: "flex", alignItems: "center", justifyContent: "center",
       }}>
         {clean}
       </div>
+
+      {/* Avg DL badge */}
       {avgDl !== null && (
         <div style={{
-          marginTop: 6,
-          padding: "3px 7px",
+          marginTop: 8, padding: "3px 8px",
           borderRadius: 99,
-          background: isActive ? color + "18" : "rgba(15,30,60,0.04)",
-          fontSize: 9, fontWeight: 700,
-          color: isActive ? color : C.textMuted,
+          background: isActive ? "rgba(255,255,255,0.14)" : "rgba(35,57,113,0.08)",
+          border: isActive ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(35,57,113,0.18)",
+          fontSize: 9.5, fontWeight: 700,
+          color: isActive ? "rgba(255,255,255,0.85)" : C.accent,
           whiteSpace: "nowrap",
         }}>
-          {Number(avgDl).toFixed(1)}M
+          ↓ {Number(avgDl).toFixed(1)} M
         </div>
       )}
+
+      {/* Active green dot */}
       {isActive && (
         <div style={{
           position: "absolute", top: 10, right: 10,
           width: 7, height: 7, borderRadius: "50%",
-          background: color,
+          background: "#00c875",
+          boxShadow: "0 0 0 3px rgba(0,200,117,0.22)",
         }} />
       )}
     </button>
@@ -357,16 +387,71 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
 
   if (!hostList.length && !rows.length) {
     return (
-      <div style={{
-        height: 280, display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-        gap: 10, color: C.textMuted,
-      }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-          stroke={C.textHint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-        </svg>
-        <span style={{ fontSize: 13 }}>Belum ada data history traffic.</span>
+      <div>
+        <div style={{
+          display: "flex", alignItems: "center",
+          justifyContent: "space-between", gap: 8, flexWrap: "wrap",
+          marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 12,
+              background: "rgba(35,57,113,0.08)",
+              border: "1px solid rgba(35,57,113,0.14)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.02em" }}>
+                History Traffic
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                Monitoring bandwidth real-time
+              </div>
+            </div>
+          </div>
+          <div style={{
+            fontSize: 11, fontWeight: 700, padding: "4px 10px",
+            borderRadius: 99, background: C.accent + "12",
+            color: C.accent, border: `1px solid ${C.accent}28`,
+          }}>
+            0 titik data
+          </div>
+        </div>
+
+        <div style={{
+          height: 220, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 14, borderRadius: 16,
+          background: "rgba(35,57,113,0.03)",
+          border: "1px dashed rgba(35,57,113,0.15)",
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 16,
+            background: "rgba(35,57,113,0.08)",
+            border: "1px solid rgba(35,57,113,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+              stroke={C.accent} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+              style={{ opacity: 0.65 }}>
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary }}>
+              Belum ada data history traffic
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 5, maxWidth: 240 }}>
+              Pilih rentang tanggal dan klik Generate untuk memuat data.
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -381,7 +466,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   );
   const yMax          = maxVal <= 10 ? 10 : Math.ceil(maxVal / 10) * 10;
   const peakThreshold = maxVal * 0.88;
-  const activeColor   = HOST_COLORS[hostList.indexOf(activeKey) % HOST_COLORS.length] || C.accent;
+  const activeColor   = C.accent;
 
   const commonAxis = {
     xAxis: (
@@ -429,76 +514,108 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   return (
     <div>
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{
-          display: "flex", alignItems: "center",
-          justifyContent: "space-between", gap: 8, flexWrap: "wrap",
-        }}>
+      <div style={{
+        display: "flex", alignItems: "center",
+        justifyContent: "space-between", gap: 8, flexWrap: "wrap",
+        marginBottom: 20,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 12,
+            background: "rgba(35,57,113,0.08)",
+            border: "1px solid rgba(35,57,113,0.14)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+              stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
           <div>
-            <div style={{
-              fontSize: 18, fontWeight: 700,
-              color: C.textPrimary, letterSpacing: "-0.02em",
-            }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.02em" }}>
               History Traffic
             </div>
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
               Monitoring bandwidth real-time
             </div>
           </div>
-          <div style={{
-            fontSize: 11, fontWeight: 700, padding: "4px 10px",
-            borderRadius: 99, background: C.accent + "12",
-            color: C.accent, border: `1px solid ${C.accent}28`,
-          }}>
-            {chartData.length} titik data
-          </div>
+        </div>
+        <div style={{
+          fontSize: 11, fontWeight: 700, padding: "4px 10px",
+          borderRadius: 99, background: C.accent + "12",
+          color: C.accent, border: `1px solid ${C.accent}28`,
+        }}>
+          {chartData.length} titik data
         </div>
       </div>
 
       {/* ── Router Selector ────────────────────────────────────── */}
       {hostList.length > 0 && (
         <div style={{ marginBottom: 18 }}>
-          <div style={{
-            fontSize: 10, fontWeight: 700, color: C.textMuted,
-            textTransform: "uppercase", letterSpacing: "0.08em",
-            marginBottom: 10,
-          }}>
-            Pilih Router · {hostList.length} device
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: C.accent,
+              textTransform: "uppercase", letterSpacing: "0.08em",
+            }}>
+              Pilih Router
+            </div>
+            <div style={{
+              fontSize: 9, fontWeight: 700, padding: "2px 8px",
+              borderRadius: 99, background: C.accent + "12",
+              color: C.accent, border: `1px solid ${C.accent}28`,
+            }}>
+              {hostList.length} device
+            </div>
           </div>
           <div style={{
-            display: "grid",
-            gridTemplateColumns: isDesktop
-              ? "repeat(auto-fit, minmax(128px, 1fr))"
-              : "repeat(auto-fit, minmax(96px, 1fr))",
+            display: "flex",
             gap: 10,
-            alignItems: "stretch",
+            flexWrap: isDesktop ? "wrap" : "nowrap",
+            overflowX: isDesktop ? "visible" : "auto",
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
+            paddingBottom: isDesktop ? 0 : 4,
           }}>
             {hostList.map((host, i) => {
               const r = grouped[host] || [];
               const vals = r.map((x) => +x.download || +x.rx || +x.avg_download || 0);
               const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
               return (
-                <RouterChip
-                  key={host}
-                  host={host}
-                  index={i}
-                  isActive={host === activeKey}
-                  avgDl={avg}
-                  onSelect={setSelectedHost}
-                />
+                <div key={host} style={{
+                  flex: isDesktop ? "1 1 128px" : "0 0 112px",
+                  minWidth: 0,
+                }}>
+                  <RouterChip
+                    host={host}
+                    index={i}
+                    isActive={host === activeKey}
+                    avgDl={avg}
+                    onSelect={setSelectedHost}
+                  />
+                </div>
               );
             })}
           </div>
         </div>
       )}
 
+      {/* ── Divider ─────────────────────────────────────────────── */}
+      <div style={{
+        height: 1,
+        background: "linear-gradient(90deg, rgba(35,57,113,0.18) 0%, rgba(35,57,113,0.06) 100%)",
+        marginBottom: 14,
+        borderRadius: 99,
+      }} />
+
       {/* ── Active Router Info Bar ─────────────────────────────── */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
         padding: "10px 14px",
         borderRadius: 14, marginBottom: 14,
-        background: activeColor + "0d",
-        border: `1px solid ${activeColor}22`,
+        background: "rgba(35,57,113,0.06)",
+        border: "1px solid rgba(35,57,113,0.18)",
         flexWrap: "wrap",
       }}>
         <div style={{
@@ -741,12 +858,13 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
 // ─── Card Wrapper ─────────────────────────────────────────────────────────────
 const Card = ({ children, style }) => (
   <div style={{
-    background: C.surface,
-    border: "1px solid rgba(35,57,113,0.14)",
-    borderTop: `3px solid ${C.accent}`,
+    background: "linear-gradient(180deg, #ffffff 0%, #fafcff 100%)",
+    border: "1px solid rgba(35,57,113,0.18)",
+    borderTop: "3px solid #233971",
     borderRadius: 20,
     padding: "20px 16px",
-    boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.06),0 20px 40px -8px rgba(0,0,0,0.07)",
+    overflow: "hidden",
+    boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.08),0 20px 40px -8px rgba(0,0,0,0.09)",
     ...style,
   }}>
     {children}

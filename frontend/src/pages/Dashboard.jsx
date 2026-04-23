@@ -20,15 +20,15 @@ import { API_BASE } from "../api";
 
 /* ─── Design Tokens ─── */
 const C = {
-  bg: "#f0f4f8",
+  bg: "#edf1fa",
   surface: "#ffffff",
-  surfaceAlt: "#f7f9fc",
-  surfaceHover: "rgba(35,57,113,0.03)",
-  navy: "#0d1f3c",
-  navyMid: "#1a3560",
-  navyLight: "#2a4a8a",
+  surfaceAlt: "#f5f8fc",
+  surfaceHover: "rgba(35,57,113,0.04)",
+  navy: "#233971",
+  navyMid: "#1c2e5a",
+  navyLight: "#2d4a96",
   accent: "#233971",
-  accentLight: "#3d5ca8",
+  accentLight: "#3a5aa0",
   green: "#146e3c",
   greenLight: "#18a057",
   amber: "#a45c0a",
@@ -270,6 +270,40 @@ const Divider = ({ style }) => (
 );
 
 /* ─── Chart Tooltip ─── */
+const DonutTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div style={{
+      background: C.navy,
+      border: `1px solid ${C.navyMid}`,
+      borderRadius: 12,
+      padding: "12px 16px",
+      boxShadow: "0 8px 24px rgba(13,31,60,0.30)",
+      minWidth: 190,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
+        <div style={{ width: 10, height: 10, borderRadius: "50%", background: d.color, flexShrink: 0, boxShadow: `0 0 0 3px ${d.color}30` }} />
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#e8eef8", lineHeight: 1.3 }}>{d.name}</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+          <span style={{ fontSize: 11, color: "#8aa0ba", fontWeight: 500 }}>Nilai</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#ffffff", fontFamily: "'JetBrains Mono', monospace" }}>{d.value.toFixed(1)} Mbps</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+          <span style={{ fontSize: 11, color: "#8aa0ba", fontWeight: 500 }}>↓ Avg DL</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#7dd3fc", fontFamily: "'JetBrains Mono', monospace" }}>{d.avgDownload.toFixed(1)} Mbps</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+          <span style={{ fontSize: 11, color: "#8aa0ba", fontWeight: 500 }}>↑ Avg UL</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#86efac", fontFamily: "'JetBrains Mono', monospace" }}>{d.avgUpload.toFixed(1)} Mbps</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -531,41 +565,68 @@ const TrafficChart = ({ rows = [], isMobile }) => {
 
   if (!data.length) {
     return (
-      <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>
-        Generate report untuk melihat chart trafik.
+      <div style={{ height: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderRadius: 16, background: "rgba(35,57,113,0.03)", border: "1px dashed rgba(35,57,113,0.15)" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(35,57,113,0.10)", border: "1px solid rgba(35,57,113,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <SvgIcon name="chart" size={26} color={C.accent} strokeWidth={1.75} opacity={0.8} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>Belum ada data trafik</div>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 5, maxWidth: 240, lineHeight: 1.5 }}>Generate report untuk melihat chart trafik bandwidth.</div>
+        </div>
       </div>
     );
   }
 
+  const mobileW = isMobile ? `${Math.max(340, data.length * 82)}px` : "100%";
+  const barItems = [
+    { key: "Avg DL", color: "#233971" },
+    { key: "Avg UL", color: "#0e7490" },
+    { key: "Peak DL", color: "#0d1f3c", opacity: 0.65 },
+    { key: "Peak UL", color: "#134e6e", opacity: 0.65 },
+  ];
+
   return (
-    <ResponsiveContainer width="100%" height={isMobile ? 240 : 360}>
-      <BarChart data={data} barGap={2} margin={{ top: 10, right: 6, left: isMobile ? -24 : -10, bottom: isMobile ? 64 : 60 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(13,31,60,0.06)" />
-        <XAxis
-          dataKey="name"
-          tick={{ fill: C.textMuted, fontSize: isMobile ? 8 : 10 }}
-          axisLine={false}
-          tickLine={false}
-          angle={-18}
-          textAnchor="end"
-          height={isMobile ? 72 : 70}
-          interval={0}
-        />
-        <YAxis
-          tick={{ fill: C.textMuted, fontSize: isMobile ? 9 : 10 }}
-          axisLine={false}
-          tickLine={false}
-          width={isMobile ? 36 : 56}
-          tickFormatter={(v) => `${v}M`}
-        />
-        <Tooltip content={<ChartTooltip />} />
-        <Legend wrapperStyle={{ color: C.textSecondary, fontSize: isMobile ? 9 : 11, paddingTop: 4 }} />
-        <Bar dataKey="Avg DL" fill="#233971" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="Avg UL" fill="#0e7490" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="Peak DL" fill="#0d1f3c" radius={[4, 4, 0, 0]} opacity={0.65} />
-        <Bar dataKey="Peak UL" fill="#134e6e" radius={[4, 4, 0, 0]} opacity={0.65} />
-      </BarChart>
-    </ResponsiveContainer>
+    <>
+      <div style={isMobile ? { overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" } : {}}>
+        <div style={{ width: mobileW, minWidth: mobileW }}>
+          <ResponsiveContainer width="100%" height={isMobile ? 248 : 348}>
+            <BarChart data={data} barGap={2} margin={{ top: 10, right: 12, left: isMobile ? -10 : -10, bottom: isMobile ? 58 : 60 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(13,31,60,0.06)" />
+              <XAxis
+                dataKey="name"
+                tick={{ fill: C.textMuted, fontSize: isMobile ? 9.5 : 10 }}
+                axisLine={false}
+                tickLine={false}
+                angle={-28}
+                textAnchor="end"
+                height={isMobile ? 68 : 70}
+                interval={0}
+              />
+              <YAxis
+                tick={{ fill: C.textMuted, fontSize: isMobile ? 9 : 10 }}
+                axisLine={false}
+                tickLine={false}
+                width={isMobile ? 40 : 56}
+                tickFormatter={(v) => `${v}M`}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Bar dataKey="Avg DL" fill="#233971" radius={[4, 4, 0, 0]} legendType="none" />
+              <Bar dataKey="Avg UL" fill="#0e7490" radius={[4, 4, 0, 0]} legendType="none" />
+              <Bar dataKey="Peak DL" fill="#0d1f3c" radius={[4, 4, 0, 0]} opacity={0.65} legendType="none" />
+              <Bar dataKey="Peak UL" fill="#134e6e" radius={[4, 4, 0, 0]} opacity={0.65} legendType="none" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? 10 : 16, marginTop: 6, flexWrap: "wrap" }}>
+        {barItems.map(({ key, color, opacity = 1 }) => (
+          <div key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: color, opacity, flexShrink: 0 }} />
+            <span style={{ fontSize: isMobile ? 9.5 : 11, color: C.textSecondary, fontWeight: 500 }}>{key}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 };
 
@@ -594,8 +655,14 @@ const DonutChart = ({ rows = [] }) => {
 
   if (!rows.length) {
     return (
-      <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>
-        Belum ada data.
+      <div style={{ height: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderRadius: 16, background: "rgba(35,57,113,0.03)", border: "1px dashed rgba(35,57,113,0.15)" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(35,57,113,0.10)", border: "1px solid rgba(35,57,113,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <SvgIcon name="pie" size={26} color={C.accent} strokeWidth={1.75} opacity={0.8} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>Belum ada data distribusi</div>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 5, maxWidth: 240, lineHeight: 1.5 }}>Generate report untuk melihat distribusi bandwidth per router.</div>
+        </div>
       </div>
     );
   }
@@ -611,14 +678,14 @@ const DonutChart = ({ rows = [] }) => {
               flex: 1,
               padding: "6px 0",
               borderRadius: 7,
-              border: "none",
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: "0.04em",
               cursor: "pointer",
               transition: "all 0.18s",
-              background: activeTab === t.key ? (t.key === "download" ? "#18a057" : t.key === "upload" ? "#f97316" : C.accent) : "transparent",
-              color: activeTab === t.key ? "#fff" : C.textMuted,
+              background: activeTab === t.key ? (t.key === "download" ? "#18a057" : t.key === "upload" ? "#f97316" : C.accent) : "rgba(35,57,113,0.06)",
+              color: activeTab === t.key ? "#fff" : C.textSecondary,
+              border: activeTab === t.key ? "none" : "1px solid rgba(35,57,113,0.12)",
               boxShadow: activeTab === t.key ? "0 2px 8px rgba(0,0,0,0.15)" : "none",
               fontFamily: "'Inter', sans-serif",
             }}
@@ -634,14 +701,7 @@ const DonutChart = ({ rows = [] }) => {
             <Pie data={data} dataKey="value" cx="50%" cy="50%" innerRadius={52} outerRadius={80} paddingAngle={3} stroke="none" animationBegin={0} animationDuration={500}>
               {data.map((d, i) => <Cell key={i} fill={d.color} />)}
             </Pie>
-            <Tooltip
-              formatter={(v, n, p) => {
-                const row = p.payload;
-                return [`${Number(v || 0).toFixed(1)} Mbps`, `${row.name} — DL ${row.avgDownload.toFixed(1)}M | UL ${row.avgUpload.toFixed(1)}M`];
-              }}
-              contentStyle={{ background: C.navy, border: `1px solid ${C.navyMid}`, borderRadius: 10, fontSize: 12, color: "#e8eef8" }}
-              labelStyle={{ display: "none" }}
-            />
+            <Tooltip content={<DonutTooltip />} />
           </PieChart>
         </ResponsiveContainer>
 
@@ -673,19 +733,19 @@ const DonutChart = ({ rows = [] }) => {
             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
               <Dot color={d.color} size={7} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {d.name}
                 </div>
-                <div style={{ fontSize: 10, color: C.textMuted, marginTop: 1, whiteSpace: "nowrap" }}>
-                  DL {d.avgDownload.toFixed(1)}M · UL {d.avgUpload.toFixed(1)}M
+                <div style={{ fontSize: 10.5, color: C.textSecondary, marginTop: 2, whiteSpace: "nowrap", fontWeight: 500 }}>
+                  ↓ {d.avgDownload.toFixed(1)}M &nbsp;·&nbsp; ↑ {d.avgUpload.toFixed(1)}M
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: tabColor, fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0, gap: 2 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: tabColor, fontFamily: "'JetBrains Mono', monospace" }}>
                 {d.value.toFixed(1)}M
               </span>
-              <span style={{ fontSize: 9, color: C.textMuted, fontWeight: 600 }}>
+              <span style={{ fontSize: 10, color: C.textSecondary, fontWeight: 600 }}>
                 {total > 0 ? ((d.value / total) * 100).toFixed(1) : 0}%
               </span>
             </div>
@@ -700,8 +760,14 @@ const DonutChart = ({ rows = [] }) => {
 const SummaryTable = ({ rows = [], isMobile }) => {
   if (!rows.length) {
     return (
-      <div style={{ padding: "40px 0", textAlign: "center", color: C.textMuted, fontSize: 13 }}>
-        Belum ada data. Generate report terlebih dahulu.
+      <div style={{ padding: "40px 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderRadius: 16, background: "rgba(35,57,113,0.03)", border: "1px dashed rgba(35,57,113,0.15)" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(35,57,113,0.10)", border: "1px solid rgba(35,57,113,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <SvgIcon name="table" size={26} color={C.accent} strokeWidth={1.75} opacity={0.8} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>Belum ada data ringkasan</div>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 5, maxWidth: 240, lineHeight: 1.5 }}>Generate report untuk melihat ringkasan trafik per host.</div>
+        </div>
       </div>
     );
   }
@@ -787,8 +853,14 @@ const SummaryTable = ({ rows = [], isMobile }) => {
 const BreakdownGrid = ({ items = [], isMobile }) => {
   if (!items.length) {
     return (
-      <div style={{ padding: "40px 0", textAlign: "center", color: C.textMuted, fontSize: 13 }}>
-        Belum ada data breakdown.
+      <div style={{ padding: "40px 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderRadius: 16, background: "rgba(35,57,113,0.03)", border: "1px dashed rgba(35,57,113,0.15)" }}>
+        <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(35,57,113,0.10)", border: "1px solid rgba(35,57,113,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <SvgIcon name="microscope" size={26} color={C.accent} strokeWidth={1.75} opacity={0.8} />
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>Belum ada data breakdown</div>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 5, maxWidth: 240, lineHeight: 1.5 }}>Generate report untuk melihat breakdown weighted score per host.</div>
+        </div>
       </div>
     );
   }
@@ -861,30 +933,29 @@ const BreakdownGrid = ({ items = [], isMobile }) => {
 /* ─── SectionTitle ─── */
 const SectionTitle = ({ children, subtitle, iconName, isMobile, right }) => (
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: isMobile ? 14 : 20, gap: 8 }}>
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {iconName && (
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            background: "rgba(35,57,113,0.09)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            marginTop: 1,
-          }}
-        >
-          <SvgIcon name={iconName} size={14} color={C.accent} strokeWidth={2} />
+        <div style={{
+          width: isMobile ? 36 : 42,
+          height: isMobile ? 36 : 42,
+          borderRadius: 12,
+          background: "linear-gradient(135deg, rgba(35,57,113,0.12) 0%, rgba(35,57,113,0.06) 100%)",
+          border: "1px solid rgba(35,57,113,0.16)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          boxShadow: "0 2px 6px rgba(35,57,113,0.08)",
+        }}>
+          <SvgIcon name={iconName} size={isMobile ? 16 : 19} color={C.accent} strokeWidth={2} />
         </div>
       )}
       <div>
-        <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.01em" }}>
+        <div style={{ fontSize: isMobile ? 14 : 15, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.02em" }}>
           {children}
         </div>
         {subtitle && !isMobile && (
-          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>{subtitle}</div>
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 3 }}>{subtitle}</div>
         )}
       </div>
     </div>
@@ -1063,14 +1134,26 @@ export default function Dashboard() {
   }, []);
 
   const handleStartChange = (val) => {
-    if (val >= minDate && val <= endDate) setStartDate(val);
+    setStartDate(val);
   };
 
   const handleEndChange = (val) => {
-    if (val >= startDate && val <= maxDate) setEndDate(val);
+    setEndDate(val);
   };
 
   const handleGenerate = async () => {
+    if (!startDate || !endDate) {
+      setError("Harap isi tanggal mulai dan akhir.");
+      return;
+    }
+    if (startDate < minDate) {
+      setError("Start date tidak boleh lebih dari 1 bulan ke belakang.");
+      return;
+    }
+    if (endDate > maxDate) {
+      setError("End date tidak boleh melebihi waktu sekarang.");
+      return;
+    }
     if (startDate >= endDate) {
       setError("Start date harus lebih awal dari end date.");
       return;
@@ -1156,7 +1239,7 @@ export default function Dashboard() {
         <div
           style={{
             position: "relative",
-            background: "linear-gradient(160deg,#ffffff 0%,rgba(35,57,113,0.03) 45%,rgba(35,57,113,0.07) 100%)",
+            background: "linear-gradient(135deg,#233971 0%,#1c2e5a 60%,#0f1e40 100%)",
             borderRadius: 20,
             border: "1px solid rgba(35,57,113,0.14)",
             overflow: "hidden",
@@ -1164,8 +1247,8 @@ export default function Dashboard() {
             marginBottom: gap,
           }}
         >
-          <div style={{ position: "absolute", top: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: "radial-gradient(circle,rgba(35,57,113,0.07) 0%,transparent 65%)", pointerEvents: "none", zIndex: 0 }} />
-          <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle,rgba(35,57,113,0.04) 1px,transparent 1px)", backgroundSize: "28px 28px", backgroundPosition: "14px 14px", pointerEvents: "none", zIndex: 0 }} />
+          <div style={{ position: "absolute", top: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: "radial-gradient(circle,rgba(255,255,255,0.10) 0%,transparent 65%)", pointerEvents: "none", zIndex: 0 }} />
+          <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle,rgba(255,255,255,0.08) 1px,transparent 1px)", backgroundSize: "28px 28px", backgroundPosition: "14px 14px", pointerEvents: "none", zIndex: 0 }} />
 
           {/* header */}
           <div
@@ -1176,8 +1259,8 @@ export default function Dashboard() {
               justifyContent: "space-between",
               alignItems: "center",
               padding: isMobile ? "14px 16px" : "22px 28px",
-              background: "linear-gradient(135deg,rgba(35,57,113,0.08) 0%,rgba(35,57,113,0.04) 50%,rgba(249,250,251,0.2) 100%)",
-              borderBottom: "1px solid rgba(35,57,113,0.12)",
+              background: "linear-gradient(135deg,rgba(255,255,255,0.06) 0%,rgba(255,255,255,0.02) 100%)",
+              borderBottom: "1px solid rgba(255,255,255,0.12)",
               gap: 12,
               flexWrap: "wrap",
             }}
@@ -1189,20 +1272,20 @@ export default function Dashboard() {
                   height: isMobile ? 38 : 46,
                   borderRadius: 12,
                   flexShrink: 0,
-                  background: "linear-gradient(135deg,rgba(35,57,113,0.10) 0%,rgba(35,57,113,0.18) 100%)",
+                  background: "linear-gradient(135deg,rgba(255,255,255,0.18) 0%,rgba(255,255,255,0.10) 100%)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  boxShadow: "0 4px 6px -1px rgba(35,57,113,0.15)",
+                  boxShadow: "0 4px 6px -1px rgba(0,0,0,0.20)",
                 }}
               >
-                <SvgIcon name="wifi" size={isMobile ? 18 : 22} color="#233971" strokeWidth={1.8} />
+                <SvgIcon name="wifi" size={isMobile ? 18 : 22} color="rgba(255,255,255,0.90)" strokeWidth={1.8} />
               </div>
               <div>
-                <h2 style={{ margin: 0, fontSize: isMobile ? 15 : 21, fontWeight: 700, color: "#0c1a2e", letterSpacing: "-0.4px", lineHeight: 1.25 }}>
+                <h2 style={{ margin: 0, fontSize: isMobile ? 15 : 21, fontWeight: 700, color: "#ffffff", letterSpacing: "-0.4px", lineHeight: 1.25 }}>
                   Network Traffic Report
                 </h2>
-                <p style={{ margin: "3px 0 0", fontSize: isMobile ? 11 : 13, color: "#6b7280" }}>
+                <p style={{ margin: "3px 0 0", fontSize: isMobile ? 11 : 13, color: "rgba(255,255,255,0.65)" }}>
                   Zabbix Monitoring · realtime
                 </p>
               </div>
@@ -1219,9 +1302,9 @@ export default function Dashboard() {
                     borderRadius: 9,
                     fontSize: 11,
                     fontWeight: 600,
-                    color: "#1e3a5f",
-                    background: "rgba(35,57,113,0.07)",
-                    border: "1px solid rgba(35,57,113,0.18)",
+                    color: "rgba(255,255,255,0.85)",
+                    background: "rgba(255,255,255,0.10)",
+                    border: "1px solid rgba(255,255,255,0.20)",
                   }}
                 >
                   {t}
@@ -1232,13 +1315,14 @@ export default function Dashboard() {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  background: "linear-gradient(135deg,#233971 0%,#1a2d5a 100%)",
+                  background: "rgba(255,255,255,0.15)",
+                  border: "1px solid rgba(255,255,255,0.25)",
                   color: "#fff",
                   padding: isMobile ? "6px 12px" : "8px 16px",
                   borderRadius: 11,
                   fontSize: isMobile ? 11 : 13,
                   fontWeight: 600,
-                  boxShadow: "0 4px 6px -1px rgba(35,57,113,0.30)",
+                  boxShadow: "0 4px 6px -1px rgba(0,0,0,0.20)",
                 }}
               >
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff", opacity: 0.85, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
@@ -1256,18 +1340,18 @@ export default function Dashboard() {
               justifyContent: "space-between",
               alignItems: "center",
               padding: isMobile ? "10px 16px" : "12px 28px",
-              background: "linear-gradient(180deg,rgba(249,250,251,0.8) 0%,rgba(255,255,255,0.5) 100%)",
+              background: "linear-gradient(180deg,rgba(255,255,255,0.05) 0%,rgba(255,255,255,0.02) 100%)",
               gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: isMobile ? 11 : 13, color: "#7a90b0", lineHeight: 1.6 }}>
+            <span style={{ fontSize: isMobile ? 11 : 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.6 }}>
               {isMobile
                 ? "Monitoring trafik jaringan berbasis Zabbix API"
                 : "Dashboard monitoring trafik jaringan berbasis Zabbix API — analisa performa, export laporan, dan notifikasi email."}
             </span>
-            <div style={{ fontSize: 12, color: "#4a6880", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <SvgIcon name="layers" size={11} color="#4a6880" strokeWidth={2} />
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <SvgIcon name="layers" size={11} color="rgba(255,255,255,0.50)" strokeWidth={2} />
               {tick.format("HH:mm")} · {tick.format("DD MMM YYYY")}
             </div>
           </div>

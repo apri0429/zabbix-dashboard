@@ -11,10 +11,12 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import CheckCircleRoundedIcon   from "@mui/icons-material/CheckCircleRounded";
-import WarningAmberRoundedIcon  from "@mui/icons-material/WarningAmberRounded";
-import ErrorRoundedIcon         from "@mui/icons-material/ErrorRounded";
-import TableRowsRoundedIcon     from "@mui/icons-material/TableRowsRounded";
+import CheckCircleRoundedIcon      from "@mui/icons-material/CheckCircleRounded";
+import WarningAmberRoundedIcon     from "@mui/icons-material/WarningAmberRounded";
+import ErrorRoundedIcon            from "@mui/icons-material/ErrorRounded";
+import AssessmentOutlinedIcon      from "@mui/icons-material/AssessmentOutlined";
+import BoltRoundedIcon             from "@mui/icons-material/BoltRounded";
+import TimelineRoundedIcon         from "@mui/icons-material/TimelineRounded";
 
 // ─── Status config ────────────────────────────────────────────────────────────
 const STATUS_META = {
@@ -141,24 +143,64 @@ function ScoreCell({ score, color }) {
 function EmptyState() {
   return (
     <TableRow>
-      <TableCell colSpan={9} align="center" sx={{ border: "none", py: 7 }}>
-        <Stack alignItems="center" spacing={1.5}>
-          <Box
-            sx={{
-              width: 50, height: 50, borderRadius: 2.5,
+      <TableCell colSpan={9} align="center" sx={{ border: "none", py: 6 }}>
+        <Stack alignItems="center" spacing={2}>
+          {/* Layered icon illustration */}
+          <Box sx={{ position: "relative", width: 96, height: 96 }}>
+            {/* Outer glow ring */}
+            <Box sx={{
+              position: "absolute", inset: 0,
+              borderRadius: "50%",
+              background: "radial-gradient(circle, rgba(26,86,219,0.10) 0%, transparent 70%)",
+            }} />
+            {/* Dashed orbit ring */}
+            <Box sx={{
+              position: "absolute", inset: 4,
+              borderRadius: "50%",
+              border: "1.5px dashed rgba(26,86,219,0.18)",
+            }} />
+            {/* Main icon box */}
+            <Box sx={{
+              position: "absolute", inset: 16,
+              borderRadius: "18px",
+              background: "linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)",
+              border: "1px solid rgba(26,86,219,0.14)",
+              boxShadow: "0 4px 16px rgba(26,86,219,0.10)",
               display: "flex", alignItems: "center", justifyContent: "center",
-              background: "#f1f5f9",
-              border: "0.5px solid rgba(0,0,0,0.07)",
-            }}
-          >
-            <TableRowsRoundedIcon sx={{ color: "#cbd5e1", fontSize: 22 }} />
+            }}>
+              <AssessmentOutlinedIcon sx={{ fontSize: 30, color: "#93c5fd" }} />
+            </Box>
+            {/* Small bolt badge top-right */}
+            <Box sx={{
+              position: "absolute", top: 6, right: 6,
+              width: 20, height: 20, borderRadius: "50%",
+              background: "#dbeafe",
+              border: "1.5px solid #ffffff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <BoltRoundedIcon sx={{ fontSize: 12, color: "#3b82f6" }} />
+            </Box>
+            {/* Small chart badge bottom-left */}
+            <Box sx={{
+              position: "absolute", bottom: 6, left: 6,
+              width: 20, height: 20, borderRadius: "50%",
+              background: "#ede9fe",
+              border: "1.5px solid #ffffff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <TimelineRoundedIcon sx={{ fontSize: 12, color: "#7c3aed" }} />
+            </Box>
           </Box>
+
+          {/* Text */}
           <Box textAlign="center">
-            <Typography sx={{ fontSize: "0.84rem", color: "#64748b", fontWeight: 700, mb: 0.25 }}>
-              Belum ada data
+            <Typography sx={{ fontSize: "0.9rem", color: "#334155", fontWeight: 700, mb: 0.5 }}>
+              Belum ada data trafik
             </Typography>
-            <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>
-              Generate report terlebih dahulu untuk melihat data trafik
+            <Typography sx={{ fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.6, maxWidth: 260, mx: "auto" }}>
+              Pilih rentang tanggal lalu klik{" "}
+              <Box component="span" sx={{ color: "#1a56db", fontWeight: 600 }}>Generate Report</Box>
+              {" "}untuk melihat data trafik jaringan
             </Typography>
           </Box>
         </Stack>

@@ -1,6 +1,57 @@
-import { Box, Paper, Stack, Typography } from "@mui/material";
+import { Box, Paper, Skeleton, Stack, Typography } from "@mui/material";
 
-export default function SummaryCard({ title, value, subtitle, color = "#1a56db", icon: Icon }) {
+const skeletonSx = { borderRadius: 1, bgcolor: "rgba(0,0,0,0.07)" };
+
+function SummaryCardSkeleton() {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2.5,
+        borderRadius: 3,
+        height: "100%",
+        position: "relative",
+        overflow: "hidden",
+        background: "#ffffff",
+        border: "0.5px solid rgba(0,0,0,0.07)",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: 0, left: 0, right: 0,
+          height: "3px",
+          background: "rgba(0,0,0,0.08)",
+          borderRadius: "12px 12px 0 0",
+          pointerEvents: "none",
+        },
+      }}
+    >
+      <Stack spacing={2} height="100%">
+        {/* Icon + badge row */}
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+          <Skeleton variant="rounded" width={44} height={44} sx={{ ...skeletonSx, borderRadius: "10px" }} />
+          <Skeleton variant="rounded" width={40} height={22} sx={{ ...skeletonSx, borderRadius: "99px" }} />
+        </Stack>
+
+        {/* Value + labels */}
+        <Box>
+          <Skeleton variant="text" width="55%" height={48} sx={skeletonSx} />
+          <Skeleton variant="text" width="70%" height={20} sx={{ ...skeletonSx, mt: 0.5 }} />
+          <Skeleton variant="text" width="85%" height={16} sx={{ ...skeletonSx, mt: 0.3 }} />
+        </Box>
+
+        {/* Bottom accent line */}
+        <Box sx={{ mt: "auto" }}>
+          <Skeleton variant="rounded" width="100%" height={2} sx={{ ...skeletonSx, borderRadius: "99px" }} />
+        </Box>
+      </Stack>
+    </Paper>
+  );
+}
+
+export default function SummaryCard({ title, value, subtitle, color = "#1a56db", icon: Icon, loading = false }) {
+  if (loading) return <SummaryCardSkeleton />;
+
   return (
     <Paper
       elevation={0}
@@ -18,7 +69,6 @@ export default function SummaryCard({ title, value, subtitle, color = "#1a56db",
           transform: "translateY(-3px)",
           boxShadow: `0 12px 32px ${color}18, 0 0 0 1px ${color}18`,
         },
-        // Colored top bar
         "&::before": {
           content: '""',
           position: "absolute",
@@ -28,7 +78,6 @@ export default function SummaryCard({ title, value, subtitle, color = "#1a56db",
           borderRadius: "12px 12px 0 0",
           pointerEvents: "none",
         },
-        // Subtle tinted background wash bottom-right
         "&::after": {
           content: '""',
           position: "absolute",
