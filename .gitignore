@@ -1,0 +1,29 @@
+# Environment files - JANGAN pernah di-commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.env.production
+
+# Output files (PDF, chart)
+C:/Zabbix/
+*.pdf
+*.png
+
+# OS
+.DS_Store
+Thumbs.db

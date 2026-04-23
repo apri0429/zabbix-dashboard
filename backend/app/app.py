@@ -37,14 +37,14 @@ except ImportError:
     from mikrotik import get_dhcp_active, get_queue_tree
 
 
-ZABBIX_URL = os.getenv("ZABBIX_URL", "http://192.168.1.233/zabbix")
-API_TOKEN = os.getenv("ZABBIX_API_TOKEN", "03e6a831215d4182f1990fb102cd78e78bc73df7c1e4cd61df287346af9ed382")
+ZABBIX_URL = os.getenv("ZABBIX_URL", "http://localhost/zabbix")
+API_TOKEN = os.getenv("ZABBIX_API_TOKEN", "")
 
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "apri@piagam.id")
-SMTP_PASS = os.getenv("SMTP_PASS", "efqnhrrptarpnwhf")
-TO_EMAIL = [email.strip() for email in os.getenv("TO_EMAIL", "it@piagam.id").split(",") if email.strip()]
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+TO_EMAIL = [email.strip() for email in os.getenv("TO_EMAIL", "").split(",") if email.strip()]
 
 BASE_OUTPUT_DIR = os.getenv("BASE_OUTPUT_DIR", r"C:\Zabbix")
 REPORT_PATH = os.path.join(BASE_OUTPUT_DIR, "Zabbix_Report.pdf")
