@@ -79,6 +79,10 @@ const GLOBAL_CSS = `
     -moz-osx-font-smoothing: grayscale;
   }
 
+  #root {
+    background-color: #233971 !important;
+  }
+
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.5; transform: scale(1.2); }
@@ -622,6 +626,7 @@ export default function Layout({
     m.setAttribute("name", "theme-color");
     m.setAttribute("content", C.blue);
     document.head.appendChild(m);
+
     document
       .querySelectorAll('meta[name="apple-mobile-web-app-status-bar-style"]')
       .forEach((el) => el.remove());
@@ -632,11 +637,21 @@ export default function Layout({
     );
     appleStatusBar.setAttribute("content", "default");
     document.head.appendChild(appleStatusBar);
+
     document.documentElement.style.backgroundColor = C.blue;
     document.body.style.backgroundColor = C.blue;
+
+    const root = document.getElementById("root");
+    if (root) {
+      root.style.backgroundColor = C.blue;
+    }
+
     return () => {
       document.documentElement.style.backgroundColor = "";
       document.body.style.backgroundColor = "";
+      if (root) {
+        root.style.backgroundColor = "";
+      }
     };
   }, []);
 
@@ -691,8 +706,7 @@ export default function Layout({
               md: `${TOPBAR_H}px`,
             },
             backgroundColor: C.blue,
-            backgroundImage:
-              "linear-gradient(180deg, rgba(44,69,132,1) 0%, rgba(35,57,113,1) 58%, rgba(28,46,92,1) 100%)",
+            backgroundImage: "none",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             borderRadius: 0,
@@ -704,14 +718,23 @@ export default function Layout({
               xs: "0 2px 0 rgba(255,255,255,0.05), 0 10px 28px rgba(15,25,55,0.24)",
               md: "0 2px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(15,25,55,0.12)",
             },
+            "&::before": {
+              content: '""',
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              background: `
+                linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 35%, rgba(0,0,0,0.04) 100%)
+              `,
+            },
             "&::after": {
               content: '""',
               position: "absolute",
               inset: 0,
               pointerEvents: "none",
-              opacity: 0.26,
+              opacity: 0.18,
               backgroundImage:
-                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='260' viewBox='0 0 1600 260'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.30' stroke-width='1.2'%3E%3Cpath d='M-80 110C70 35 180 35 330 110S590 185 740 110s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3Cpath d='M-80 190C70 115 180 115 330 190S590 265 740 190s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3C/g%3E%3C/svg%3E\")",
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='260' viewBox='0 0 1600 260'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.24' stroke-width='1.2'%3E%3Cpath d='M-80 110C70 35 180 35 330 110S590 185 740 110s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3Cpath d='M-80 190C70 115 180 115 330 190S590 265 740 190s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3C/g%3E%3C/svg%3E\")",
               backgroundSize: "cover",
               backgroundPosition: "center",
             },
@@ -857,11 +880,35 @@ export default function Layout({
               position: "relative",
               zIndex: 2,
               overflow: "visible",
-              background:
-                "linear-gradient(180deg, rgba(44,69,132,1) 0%, rgba(35,57,113,1) 58%, rgba(28,46,92,1) 100%)",
+              backgroundColor: C.blue,
+              backgroundImage: "none",
               pt: "env(safe-area-inset-top, 0px)",
             }}
           >
+            <Box
+              sx={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                background: `
+                  linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 35%, rgba(0,0,0,0.04) 100%)
+                `,
+              }}
+            />
+
+            <Box
+              sx={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                opacity: 0.18,
+                backgroundImage:
+                  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='260' viewBox='0 0 1600 260'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.24' stroke-width='1.2'%3E%3Cpath d='M-80 110C70 35 180 35 330 110S590 185 740 110s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3Cpath d='M-80 190C70 115 180 115 330 190S590 265 740 190s260-75 410 0 260 75 410 0 260-75 410 0'/%3E%3C/g%3E%3C/svg%3E\")",
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+
             <Box
               sx={{
                 px: 2,
@@ -871,6 +918,8 @@ export default function Layout({
                 alignItems: "center",
                 gap: 1.1,
                 minHeight: MOBILE_TOPBAR_H,
+                position: "relative",
+                zIndex: 1,
               }}
             >
               <LogoMark size={50} radius="14px" />
@@ -951,6 +1000,8 @@ export default function Layout({
               sx={{
                 height: "1px",
                 flexShrink: 0,
+                position: "relative",
+                zIndex: 1,
                 background: `linear-gradient(90deg, transparent, ${alpha(
                   C.white,
                   0.16
