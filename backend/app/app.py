@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from fpdf import FPDF, XPos, YPos
@@ -1412,7 +1413,7 @@ def build_weighted_breakdown(summary: List[Dict]) -> List[Dict]:
     return result
 
 
-@app.get("/")
+@app.get("/api/info")
 def root():
     return {
         "message": "Zabbix Report Backend API running",
@@ -1642,6 +1643,11 @@ def api_send_email(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+FRONTEND_DIST = BASE_DIR.parent.parent / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static")
 
 
 def main():
