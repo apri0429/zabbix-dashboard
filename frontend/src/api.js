@@ -1,5 +1,5 @@
 const envBase = import.meta.env.VITE_API_BASE;
-const envPort = import.meta.env.VITE_API_PORT || "8095";
+const envPort = import.meta.env.VITE_API_PORT || "8005";
 
 const browserHost =
   typeof window !== "undefined" && window.location?.hostname

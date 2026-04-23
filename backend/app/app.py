@@ -360,6 +360,76 @@ def find_hostid(host_name: str) -> Optional[str]:
     return hosts[0]["hostid"]
 
 
+def zabbix_request(method: str, params: Optional[Dict] = None):
+    if params is None:
+        params = {}
+
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json-rpc"
+    }
+
+    payload = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1
+    }
+
+    try:
+        r = requests.post(
+            f"{ZABBIX_URL}/api_jsonrpc.php",
+            json=payload,
+            headers=headers,
+            timeout=60
+        )
+        r.raise_for_status()
+        response = r.json()
+
+        if "error" in response:
+            logging.error("Zabbix API error (%s): %s", method, response["error"])
+            return []
+
+        return response.get("result", [])
+    except requests.exceptions.RequestException as e:
+        logging.exception("Zabbix request failed (%s): %s", method, e)
+        return []
+
+
+def find_hostid(host_name: str) -> Optional[str]:
+    cached = HOSTID_CACHE.get(host_name)
+    if cached:
+        return cached
+
+    hosts = zabbix_request("host.get", {
+        "output": ["hostid", "host", "name"],
+        "filter": {"host": [host_name]}
+    })
+
+    if not hosts:
+        hosts = zabbix_request("host.get", {
+            "output": ["hostid", "host", "name"],
+            "search": {"name": host_name}
+        })
+
+    if not hosts:
+        logging.warning("Host tidak ditemukan di Zabbix: %s", host_name)
+        return None
+
+    for h in hosts:
+        if normalize_text(h.get("host", "")) == normalize_text(host_name):
+            HOSTID_CACHE[host_name] = h["hostid"]
+            return h["hostid"]
+
+    for h in hosts:
+        if normalize_text(h.get("name", "")) == normalize_text(host_name):
+            HOSTID_CACHE[host_name] = h["hostid"]
+            return h["hostid"]
+
+    HOSTID_CACHE[host_name] = hosts[0]["hostid"]
+    return hosts[0]["hostid"]
+
+
 def list_hosts(search: str = "") -> List[Dict]:
     params = {
         "output": ["hostid", "host", "name"],
@@ -1577,7 +1647,7 @@ def api_send_email(
 def main():
     import uvicorn
     host = os.getenv("APP_HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", "8005"))
+    port = int(os.getenv("APP_PORT", "8095"))
     uvicorn.run(app, host=host, port=port, reload=False, access_log=False)
 
 
