@@ -463,10 +463,20 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
     );
   }
 
-  const peakDl = Math.max(...chartData.map((d) => d.download), 0);
-  const peakUl = Math.max(...chartData.map((d) => d.upload), 0);
-  const avgDl  = chartData.length ? chartData.reduce((s, d) => s + d.download, 0) / chartData.length : 0;
-  const avgUl  = chartData.length ? chartData.reduce((s, d) => s + d.upload,   0) / chartData.length : 0;
+  // Pakai summary row agar nilai metrik sama persis dengan ReportTable
+  const activeSummaryRow = summaryRows.find((s) => s.label === activeKey);
+  const peakDl = activeSummaryRow
+    ? +activeSummaryRow.peak_download || 0
+    : Math.max(...chartData.map((d) => d.download), 0);
+  const peakUl = activeSummaryRow
+    ? +activeSummaryRow.peak_upload || 0
+    : Math.max(...chartData.map((d) => d.upload), 0);
+  const avgDl = activeSummaryRow
+    ? +activeSummaryRow.avg_download || 0
+    : chartData.length ? chartData.reduce((s, d) => s + d.download, 0) / chartData.length : 0;
+  const avgUl = activeSummaryRow
+    ? +activeSummaryRow.avg_upload || 0
+    : chartData.length ? chartData.reduce((s, d) => s + d.upload, 0) / chartData.length : 0;
 
   const maxVal = Math.max(
     ...chartData.map((d) => Math.max(showDl ? d.download : 0, showUl ? d.upload : 0)), 0
