@@ -269,19 +269,30 @@ const Divider = ({ style }) => (
   <div style={{ height: 1, background: "rgba(35,57,113,0.12)", ...style }} />
 );
 
+const stopTooltipPropagation = (event) => {
+  event.stopPropagation();
+};
+
 /* ─── Chart Tooltip ─── */
 const DonutTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
-    <div style={{
-      background: C.navy,
-      border: `1px solid ${C.navyMid}`,
-      borderRadius: 12,
-      padding: "12px 16px",
-      boxShadow: "0 8px 24px rgba(13,31,60,0.30)",
-      minWidth: 190,
-    }}>
+    <div
+      onClick={stopTooltipPropagation}
+      onMouseDown={stopTooltipPropagation}
+      onPointerDown={stopTooltipPropagation}
+      onTouchStart={stopTooltipPropagation}
+      style={{
+        background: C.navy,
+        border: `1px solid ${C.navyMid}`,
+        borderRadius: 12,
+        padding: "12px 16px",
+        boxShadow: "0 8px 24px rgba(13,31,60,0.30)",
+        minWidth: 190,
+        pointerEvents: "auto",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
         <div style={{ width: 10, height: 10, borderRadius: "50%", background: d.color, flexShrink: 0, boxShadow: `0 0 0 3px ${d.color}30` }} />
         <div style={{ fontSize: 12, fontWeight: 700, color: "#e8eef8", lineHeight: 1.3 }}>{d.name}</div>
@@ -695,13 +706,13 @@ const DonutChart = ({ rows = [] }) => {
         ))}
       </div>
 
-      <div style={{ position: "relative", height: 180 }}>
+      <div style={{ position: "relative", height: 180, isolation: "isolate" }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie data={data} dataKey="value" cx="50%" cy="50%" innerRadius={52} outerRadius={80} paddingAngle={3} stroke="none" animationBegin={0} animationDuration={500}>
               {data.map((d, i) => <Cell key={i} fill={d.color} />)}
             </Pie>
-            <Tooltip content={<DonutTooltip />} />
+            <Tooltip content={<DonutTooltip />} wrapperStyle={{ pointerEvents: "auto", zIndex: 40 }} />
           </PieChart>
         </ResponsiveContainer>
 
