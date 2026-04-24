@@ -320,9 +320,19 @@ const PeakDot = ({ cx, cy, value, color, threshold }) => {
 const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   const normalizedRows = useMemo(() => {
     const fallback = historyMeta?.selected_label || summaryRows?.[0]?.label || "Router";
-    return (rows || []).map((r) => ({
-      ...r,
-      host: r.host || r.label || r.name || r.router || r.selected_label || fallback,
+    if ((rows || []).length > 0) {
+      return rows.map((r) => ({
+        ...r,
+        host: r.host || r.label || r.name || r.router || r.selected_label || fallback,
+      }));
+    }
+    // Fallback ke summaryRows ketika tidak ada data time-series
+    return (summaryRows || []).map((s) => ({
+      ...s,
+      host:     s.label || fallback,
+      time:     s.label,
+      download: +s.avg_download || 0,
+      upload:   +s.avg_upload   || 0,
     }));
   }, [rows, summaryRows, historyMeta]);
 
@@ -333,11 +343,8 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
       if (!map[key]) map[key] = [];
       map[key].push(r);
     });
-    if (!Object.keys(map).length && summaryRows?.length) {
-      summaryRows.forEach((s) => { if (!map[s.label]) map[s.label] = []; });
-    }
     return map;
-  }, [normalizedRows, summaryRows]);
+  }, [normalizedRows]);
 
   const hostList = useMemo(() => {
     const keys = Object.keys(grouped).filter(Boolean);
@@ -385,7 +392,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
 
   const ticks = useMemo(() => buildTicks(chartData, 7), [chartData]);
 
-  if (!hostList.length && !rows.length) {
+  if (!hostList.length) {
     return (
       <div>
         <div style={{
@@ -579,9 +586,14 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
             paddingBottom: isDesktop ? 0 : 4,
           }}>
             {hostList.map((host, i) => {
-              const r = grouped[host] || [];
-              const vals = r.map((x) => +x.download || +x.rx || +x.avg_download || 0);
-              const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+              const summaryRow = summaryRows.find((s) => s.label === host);
+              const avg = summaryRow
+                ? (+summaryRow.avg_download || null)
+                : (() => {
+                    const r = grouped[host] || [];
+                    const vals = r.map((x) => +x.download || +x.rx || +x.avg_download || 0);
+                    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+                  })();
               return (
                 <div key={host} style={{
                   flex: isDesktop ? "1 1 128px" : "0 0 112px",
