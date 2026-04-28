@@ -1,0 +1,56 @@
+:root {
+  /* Base palette */
+  --theme-blue-overlay: #163a6b;
+  --theme-blue-primary: #1f4e8c;
+  --theme-blue-medium: #2f6fb2;
+  --theme-accent-primary: #f4a940;
+  --theme-accent-highlight: #ffc861;
+  --theme-white: #f7fbff;
+  --theme-white-soft: #dbe7f5;
+
+  /* Semantic theme tokens */
+  --bg: var(--theme-blue-primary);
+  --surface: rgba(22, 58, 107, 0.78);
+  --surface-strong: rgba(22, 58, 107, 0.92);
+  --surface-soft: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.16);
+  --border-accent: rgba(255, 200, 97, 0.28);
+  --text: var(--theme-white);
+  --text-soft: #e7f0fb;
+  --muted: var(--theme-white-soft);
+  --accent: var(--theme-accent-primary);
+  --accent-highlight: var(--theme-accent-highlight);
+  --accent-soft: rgba(244, 169, 64, 0.2);
+  --accent-soft-strong: rgba(255, 200, 97, 0.18);
+  --primary-soft: rgba(47, 111, 178, 0.22);
+  --primary-soft-strong: rgba(47, 111, 178, 0.34);
+  --overlay-soft: rgba(22, 58, 107, 0.74);
+  --overlay-strong: rgba(22, 58, 107, 0.94);
+  --shadow: 0 24px 80px rgba(8, 20, 42, 0.32);
+
+  /* Theme backgrounds and effects */
+  --page-background:
+    radial-gradient(circle at top left, rgba(244, 169, 64, 0.1), transparent 24%),
+    radial-gradient(circle at 88% 16%, rgba(47, 111, 178, 0.12), transparent 22%),
+    radial-gradient(circle at 50% 100%, rgba(22, 58, 107, 0.06), transparent 26%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  --hero-background:
+    radial-gradient(circle at top right, rgba(255, 200, 97, 0.24), transparent 28%),
+    linear-gradient(145deg, rgba(47, 111, 178, 0.9), rgba(22, 58, 107, 0.94));
+  --sidebar-active-background:
+    linear-gradient(135deg, rgba(47, 111, 178, 0.34), rgba(244, 169, 64, 0.2));
+  --hero-glow: rgba(255, 200, 97, 0.16);
+
+  /* Component tones */
+  --status-chip-border: rgba(255, 200, 97, 0.22);
+  --status-chip-background: rgba(255, 200, 97, 0.14);
+  --status-chip-text: #fff3d6;
+  --status-chip-dot: var(--accent-highlight);
+  --status-chip-ring: rgba(255, 200, 97, 0.16);
+  --summary-positive-text: #d8e8ff;
+  --summary-positive-background: rgba(47, 111, 178, 0.24);
+  --summary-warning-text: #fff0cb;
+  --summary-warning-background: rgba(244, 169, 64, 0.2);
+  --summary-negative-text: #fff4da;
+  --summary-negative-background: rgba(255, 200, 97, 0.18);
+}

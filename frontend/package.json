@@ -13,6 +13,7 @@
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^7.0.0",
     "@mui/material": "^7.0.0",
+    "@untitledui/icons": "^0.0.22",
     "axios": "^1.13.6",
     "dayjs": "^1.11.20",
     "react": "^19.0.0",
