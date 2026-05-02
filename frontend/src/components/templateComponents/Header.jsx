@@ -9,7 +9,6 @@ import {
   XClose,
 } from '@untitledui/icons'
 
-import logoPiagamTransparent from './assets/logo-piagam2.png'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
@@ -17,6 +16,14 @@ import {
   getDepartmentFilterOptions,
   getSelectedDepartmentFilterLabel,
 } from './departmentFilter.js'
+
+const headerLogos = import.meta.glob('./assets/logo-piagam*.png', {
+  eager: true,
+  import: 'default',
+})
+
+const brandLogoSrc =
+  headerLogos['./assets/logo-piagam2.png'] ?? headerLogos['./assets/logo-piagam.png'] ?? ''
 
 function Header({
   breadcrumb = [
@@ -247,12 +254,9 @@ function Header({
 
   return (
     <header className="header-main">
-      <img
-        src={logoPiagamTransparent}
-        alt=""
-        aria-hidden="true"
-        className="header-accent-logo"
-      />
+      {brandLogoSrc ? (
+        <img src={brandLogoSrc} alt="" aria-hidden="true" className="header-accent-logo" />
+      ) : null}
 
       <div className="header-content">
         <div className="header-left">
@@ -268,7 +272,9 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            <img src={logoPiagamTransparent} alt="Logo Piagam" className="header-brand-logo" />
+            {brandLogoSrc ? (
+              <img src={brandLogoSrc} alt="Logo Piagam" className="header-brand-logo" />
+            ) : null}
           </div>
         </div>
 
