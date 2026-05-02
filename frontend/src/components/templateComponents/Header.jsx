@@ -9,7 +9,6 @@ import {
   XClose,
 } from '@untitledui/icons'
 
-import logoPiagam from './assets/logo-piagam.png'
 import logoPiagamTransparent from './assets/logo-piagam2.png'
 import './templateComponents.css'
 import {
@@ -20,7 +19,6 @@ import {
 } from './departmentFilter.js'
 
 function Header({
-  title = 'Pilar Group',
   breadcrumb = [
     { label: 'All', href: '#' },
     { label: 'Finance', href: '#', active: true },
@@ -270,12 +268,12 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            <img src={logoPiagam} alt="Logo Piagam" className="header-brand-logo" />
+            <img src={logoPiagamTransparent} alt="Logo Piagam" className="header-brand-logo" />
           </div>
         </div>
 
         <div className="header-right">
-          <span className="header-brand-title">{title}</span>
+          <span className="header-brand-title">NetroWatch</span>
         </div>
       </div>
 

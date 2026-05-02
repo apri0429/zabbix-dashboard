@@ -603,7 +603,7 @@ select {
 .header-menu-button {
   width: 44px;
   height: 44px;
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   color: #fff;
@@ -3082,6 +3082,10 @@ select {
 }
 
 @media (max-width: 768px) {
+  .header-menu-button {
+    display: inline-flex;
+  }
+
   .header-accent-logo {
     top: -12px;
     right: -52px;
