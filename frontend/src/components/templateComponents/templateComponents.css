@@ -286,6 +286,7 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: calc(100% - 16px);
   margin: 0 8px;
   padding: 12px 1.5rem;
   border-radius: 8px;
@@ -359,6 +360,7 @@ select {
 }
 
 .nav-item--button {
+  width: calc(100% - 16px);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -440,11 +442,18 @@ select {
 
 .logout-item {
   color: #fca5a5;
+  align-items: flex-start;
+  min-height: 52px;
 }
 
 .logout-item:hover {
   color: #fecaca;
   background: rgba(239, 68, 68, 0.12);
+}
+
+.logout-item .nav-text {
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .sidebar.collapsed .sidebar-logo,

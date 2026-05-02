@@ -32,7 +32,7 @@ export const primaryNavigationItems = [
 
 export const secondaryNavigationItems = [
   {
-    label: 'Logout',
+    label: 'Kembali ke Pilar Group',
     href: '/logout',
     icon: LogOut01,
     variant: 'danger',
