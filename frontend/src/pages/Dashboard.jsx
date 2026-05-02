@@ -53,6 +53,24 @@ const STATUS = {
   TINGGI: { color: C.red, bg: "rgba(153,27,27,0.08)", border: "rgba(153,27,27,0.22)", label: "Tinggi" },
 };
 
+const MAIN_CARD_SHELL = {
+  position: "relative",
+  background: "#ffffff",
+  borderRadius: 20,
+  border: "1px solid rgba(35,57,113,0.10)",
+  overflow: "hidden",
+  boxShadow:
+    "0 1px 0 rgba(255,255,255,0.8), 0 4px 6px -2px rgba(35,57,113,0.05), 0 20px 48px -8px rgba(35,57,113,0.09)",
+};
+
+const INNER_CARD_SHELL = {
+  background: "#ffffff",
+  border: "1px solid rgba(35,57,113,0.10)",
+  borderRadius: 20,
+  boxShadow:
+    "0 1px 0 rgba(255,255,255,0.8), 0 4px 6px -2px rgba(35,57,113,0.05), 0 20px 48px -8px rgba(35,57,113,0.09)",
+};
+
 /* ─── Global CSS ─── */
 const globalStyle = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -202,13 +220,10 @@ const SvgIcon = ({ name, size = 16, color = "currentColor", strokeWidth = 1.75, 
 const Card = ({ children, style, accent }) => (
   <div
     style={{
-      background: C.surface,
-      border: "1px solid rgba(35,57,113,0.14)",
-      borderRadius: 20,
+      ...INNER_CARD_SHELL,
       padding: 20,
       position: "relative",
       overflow: "hidden",
-      boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.06),0 20px 40px -8px rgba(0,0,0,0.07)",
       ...(accent ? { borderTop: `3px solid ${accent}` } : {}),
       ...style,
     }}
@@ -415,11 +430,9 @@ const StatCard = ({ label, value, sublabel, isMobile }) => {
       style={{
         position: "relative",
         overflow: "hidden",
+        ...INNER_CARD_SHELL,
         background: t.softBg,
-        border: "1px solid rgba(35,57,113,0.14)",
-        borderRadius: 20,
         padding: isMobile ? "16px 14px 14px" : "20px 20px 18px",
-        boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.06),0 20px 40px -8px rgba(0,0,0,0.07)",
         minHeight: isMobile ? 150 : 170,
       }}
     >
@@ -1246,18 +1259,17 @@ export default function Dashboard() {
       )}
 
       <div style={{ width: "100%", padding: pad }} data-dashboard-page="true">
-        {/* ── Hero Card ── */}
-        <div
-          style={{
-            position: "relative",
-            background: "linear-gradient(135deg,#233971 0%,#1c2e5a 60%,#0f1e40 100%)",
-            borderRadius: 20,
-            border: "1px solid rgba(35,57,113,0.14)",
-            overflow: "hidden",
-            boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.06),0 20px 40px -8px rgba(0,0,0,0.07)",
-            marginBottom: gap,
-          }}
-        >
+        <div style={MAIN_CARD_SHELL}>
+          {/* ── Hero Card ── */}
+          <div
+            style={{
+              position: "relative",
+              background: "linear-gradient(135deg,#233971 0%,#1c2e5a 60%,#0f1e40 100%)",
+              borderBottom: "1px solid rgba(226,232,240,0.8)",
+              overflow: "hidden",
+              marginBottom: gap,
+            }}
+          >
           <div style={{ position: "absolute", top: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: "radial-gradient(circle,rgba(255,255,255,0.10) 0%,transparent 65%)", pointerEvents: "none", zIndex: 0 }} />
           <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle,rgba(255,255,255,0.08) 1px,transparent 1px)", backgroundSize: "28px 28px", backgroundPosition: "14px 14px", pointerEvents: "none", zIndex: 0 }} />
 
@@ -1366,10 +1378,11 @@ export default function Dashboard() {
               {tick.format("HH:mm")} · {tick.format("DD MMM YYYY")}
             </div>
           </div>
-        </div>
+          </div>
 
-        {/* ── Date Range & Actions ── */}
-        <Card style={{ marginBottom: gap, padding: cardPad }}>
+          <div style={{ padding: isMobile ? 12 : 20, background: "#f8fafc" }}>
+            {/* ── Date Range & Actions ── */}
+            <Card style={{ marginBottom: gap, padding: cardPad }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div
               style={{
@@ -1452,89 +1465,91 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </Card>
+            </Card>
 
-        {error && (
-          <div
-            style={{
-              padding: "12px 16px",
-              borderRadius: 10,
-              marginBottom: gap,
-              background: "rgba(153,27,27,0.07)",
-              border: "1px solid rgba(153,27,27,0.20)",
-              color: C.red,
-              fontSize: 13,
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 9,
-              fontWeight: 500,
-            }}
-          >
-            <SvgIcon name="alert" size={15} color={C.red} strokeWidth={2} />
-            <span style={{ lineHeight: 1.5 }}>{error}</span>
+            {error && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: 10,
+                  marginBottom: gap,
+                  background: "rgba(153,27,27,0.07)",
+                  border: "1px solid rgba(153,27,27,0.20)",
+                  color: C.red,
+                  fontSize: 13,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 9,
+                  fontWeight: 500,
+                }}
+              >
+                <SvgIcon name="alert" size={15} color={C.red} strokeWidth={2} />
+                <span style={{ lineHeight: 1.5 }}>{error}</span>
+              </div>
+            )}
+
+            {/* ── Stat Cards ── */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
+                gap: isMobile ? 10 : gap,
+                marginBottom: gap,
+              }}
+            >
+              {stats.map((s) => (
+                <StatCard key={s.label} {...s} isMobile={isMobile} />
+              ))}
+            </div>
+
+            <HistoryTrafficSection
+              rows={historyChartData}
+              summaryRows={report?.summary || []}
+              historyMeta={historyMeta}
+              cardStyle={{ marginBottom: gap }}
+            />
+
+            {/* ── Charts ── */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile || isTablet ? "1fr" : "1fr 360px",
+                gap,
+                marginBottom: gap,
+              }}
+            >
+              <Card accent={C.accent} style={{ padding: cardPad }}>
+                <SectionTitle iconName="chart" subtitle="Rata-rata dan peak bandwidth per interface" isMobile={isMobile}>
+                  Traffic Chart
+                </SectionTitle>
+                <TrafficChart rows={report?.summary || []} isMobile={isMobile} />
+              </Card>
+
+              <Card accent="#0e7490" style={{ padding: cardPad }}>
+                <SectionTitle iconName="pie" subtitle="Distribusi avg bandwidth per host" isMobile={isMobile}>
+                  Distribusi Bandwidth
+                </SectionTitle>
+                <DonutChart rows={report?.summary || []} />
+              </Card>
+            </div>
+
+            <Card accent={C.accent} style={{ marginBottom: gap, padding: cardPad }}>
+              <SectionTitle iconName="table" subtitle="Data summary dari Zabbix API" isMobile={isMobile}>
+                Ringkasan Trafik
+              </SectionTitle>
+              <Divider style={{ marginBottom: 0 }} />
+              <SummaryTable rows={report?.summary || []} isMobile={isMobile} />
+            </Card>
+
+            <Card accent={C.navyLight} style={{ marginBottom: 0, padding: cardPad }}>
+              <SectionTitle iconName="microscope" subtitle="Score = (60% × Max Avg %) + (40% × Max P95 %)" isMobile={isMobile}>
+                Breakdown Weighted Score
+              </SectionTitle>
+              <Divider style={{ marginBottom: 14 }} />
+              <BreakdownGrid items={report?.weighted_breakdown || []} isMobile={isMobile} />
+            </Card>
           </div>
-        )}
-
-        {/* ── Stat Cards ── */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
-            gap: isMobile ? 10 : gap,
-            marginBottom: gap,
-          }}
-        >
-          {stats.map((s) => (
-            <StatCard key={s.label} {...s} isMobile={isMobile} />
-          ))}
         </div>
-
-        <HistoryTrafficSection
-          rows={historyChartData}
-          summaryRows={report?.summary || []}
-          historyMeta={historyMeta}
-          cardStyle={{ marginBottom: gap }}
-        />
-
-        {/* ── Charts ── */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: isMobile || isTablet ? "1fr" : "1fr 360px",
-            gap,
-            marginBottom: gap,
-          }}
-        >
-          <Card accent={C.accent} style={{ padding: cardPad }}>
-            <SectionTitle iconName="chart" subtitle="Rata-rata dan peak bandwidth per interface" isMobile={isMobile}>
-              Traffic Chart
-            </SectionTitle>
-            <TrafficChart rows={report?.summary || []} isMobile={isMobile} />
-          </Card>
-
-          <Card accent="#0e7490" style={{ padding: cardPad }}>
-            <SectionTitle iconName="pie" subtitle="Distribusi avg bandwidth per host" isMobile={isMobile}>
-              Distribusi Bandwidth
-            </SectionTitle>
-            <DonutChart rows={report?.summary || []} />
-          </Card>
-        </div>
-
-        <Card accent={C.accent} style={{ marginBottom: gap, padding: cardPad }}>
-          <SectionTitle iconName="table" subtitle="Data summary dari Zabbix API" isMobile={isMobile}>
-            Ringkasan Trafik
-          </SectionTitle>
-          <Divider style={{ marginBottom: 0 }} />
-          <SummaryTable rows={report?.summary || []} isMobile={isMobile} />
-        </Card>
-
-        <Card accent={C.navyLight} style={{ marginBottom: gap, padding: cardPad }}>
-          <SectionTitle iconName="microscope" subtitle="Score = (60% × Max Avg %) + (40% × Max P95 %)" isMobile={isMobile}>
-            Breakdown Weighted Score
-          </SectionTitle>
-          <Divider style={{ marginBottom: 14 }} />
-          <BreakdownGrid items={report?.weighted_breakdown || []} isMobile={isMobile} />
-        </Card>
       </div>
     </>
   );
