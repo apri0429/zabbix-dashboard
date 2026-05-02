@@ -9,7 +9,8 @@ import {
   XClose,
 } from '@untitledui/icons'
 
-import logoPiagamSvg from './assets/logo-piagam.svg'
+import logoPiagam from './assets/logo-piagam.png'
+import logoPiagam2Svg from './assets/logo-piagam2.svg'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
@@ -17,14 +18,6 @@ import {
   getDepartmentFilterOptions,
   getSelectedDepartmentFilterLabel,
 } from './departmentFilter.js'
-
-const headerLogos = import.meta.glob('./assets/logo-piagam*.png', {
-  eager: true,
-  import: 'default',
-})
-
-const accentLogoSrc =
-  headerLogos['./assets/logo-piagam2.png'] ?? logoPiagamSvg
 
 function Header({
   breadcrumb = [
@@ -255,9 +248,7 @@ function Header({
 
   return (
     <header className="header-main">
-      {accentLogoSrc ? (
-        <img src={accentLogoSrc} alt="" aria-hidden="true" className="header-accent-logo" />
-      ) : null}
+      <img src={logoPiagam2Svg} alt="" aria-hidden="true" className="header-accent-logo" />
 
       <div className="header-content">
         <div className="header-left">
@@ -273,7 +264,7 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            <img src={logoPiagamSvg} alt="Logo Piagam" className="header-brand-logo" />
+            <img src={logoPiagam} alt="Logo Piagam" className="header-brand-logo" />
           </div>
         </div>
 

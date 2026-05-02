@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="logoPiagam2Title logoPiagam2Desc">
+  <title id="logoPiagam2Title">Logo Piagam 2</title>
+  <desc id="logoPiagam2Desc">Logo transparan bergaya piagam untuk aksen header.</desc>
+  <defs>
+    <linearGradient id="piagam2Outline" x1="36" y1="24" x2="124" y2="136" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.88" />
+      <stop offset="0.55" stop-color="#e9c46a" stop-opacity="0.78" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.38" />
+    </linearGradient>
+    <linearGradient id="piagam2Core" x1="52" y1="42" x2="111" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34" />
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0.16" />
+    </linearGradient>
+  </defs>
+  <path
+    d="M80 12 128 31v37c0 35-18 59-48 80C50 127 32 103 32 68V31L80 12Z"
+    fill="url(#piagam2Core)"
+    stroke="url(#piagam2Outline)"
+    stroke-width="6"
+  />
+  <path
+    d="M80 27 114 41v26c0 26-12 43-34 61C58 110 46 93 46 67V41l34-14Z"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.42"
+    stroke-width="4"
+  />
+  <path
+    d="M67 50h18c13 0 21 7 21 19 0 13-9 20-22 20H77v19H67V50Zm10 9v21h7c7 0 12-3 12-10 0-7-5-11-12-11h-7Z"
+    fill="#ffffff"
+    fill-opacity="0.7"
+  />
+  <path
+    d="M51 119c10-4 19-6 29-6s19 2 29 6"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.4"
+    stroke-linecap="round"
+    stroke-width="5"
+  />
+</svg>
