@@ -9,6 +9,7 @@ import {
   XClose,
 } from '@untitledui/icons'
 
+import logoPiagam from './assets/logo-piagam.png'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
@@ -22,7 +23,7 @@ const headerLogos = import.meta.glob('./assets/logo-piagam*.png', {
   import: 'default',
 })
 
-const brandLogoSrc =
+const accentLogoSrc =
   headerLogos['./assets/logo-piagam2.png'] ?? headerLogos['./assets/logo-piagam.png'] ?? ''
 
 function Header({
@@ -254,8 +255,8 @@ function Header({
 
   return (
     <header className="header-main">
-      {brandLogoSrc ? (
-        <img src={brandLogoSrc} alt="" aria-hidden="true" className="header-accent-logo" />
+      {accentLogoSrc ? (
+        <img src={accentLogoSrc} alt="" aria-hidden="true" className="header-accent-logo" />
       ) : null}
 
       <div className="header-content">
@@ -272,9 +273,7 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            {brandLogoSrc ? (
-              <img src={brandLogoSrc} alt="Logo Piagam" className="header-brand-logo" />
-            ) : null}
+            <img src={logoPiagam} alt="Logo Piagam" className="header-brand-logo" />
           </div>
         </div>
 
