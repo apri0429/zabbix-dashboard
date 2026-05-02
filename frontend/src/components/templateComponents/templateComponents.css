@@ -75,10 +75,7 @@ select {
   width: 100%;
   max-width: 100%;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top right, rgba(42, 157, 143, 0.1), transparent 24%),
-    radial-gradient(circle at bottom left, rgba(231, 111, 81, 0.08), transparent 22%),
-    linear-gradient(180deg, #f6f9fc 0%, #edf3f9 100%);
+  background: transparent;
   transition: grid-template-columns var(--layout-transition-duration) var(--layout-transition-easing);
 }
 
@@ -102,6 +99,18 @@ select {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+}
+
+.dashboard-footer {
+  padding: 1.1rem 1.5rem 1.4rem;
+  text-align: center;
+  color: #5a6b88;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.dashboard-footer__line {
+  margin: 0;
 }
 
 .sidebar {
@@ -3020,6 +3029,19 @@ select {
     transform: translateX(-100%);
   }
 
+  .sidebar-nav {
+    order: 2;
+    flex: 1;
+    padding-top: 0.85rem;
+  }
+
+  .sidebar-bottom {
+    order: 1;
+    padding: 0.85rem 0 0.95rem;
+    border-top: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
   .sidebar.mobile-open {
     transform: translateX(0);
   }
@@ -3212,6 +3234,11 @@ select {
 
   .register-user-popup__grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-footer {
+    padding: 1rem 1rem 1.25rem;
+    font-size: 0.78rem;
   }
 }
 

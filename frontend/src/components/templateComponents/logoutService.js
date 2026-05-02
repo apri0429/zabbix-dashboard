@@ -1,23 +1,18 @@
 import { clearAuthSession } from './authStorage.js'
 
-export const LOGIN_PATH = '/login'
+export const LOGOUT_REDIRECT_URL = 'https://pilargroup.id'
 
-function redirectToLogin() {
+function redirectToPilarGroup() {
   if (typeof window === 'undefined') {
     return
   }
 
   clearAuthSession()
-
-  if (window.location.pathname !== LOGIN_PATH) {
-    window.history.replaceState({}, '', LOGIN_PATH)
-  }
-
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  window.location.assign(LOGOUT_REDIRECT_URL)
 }
 
 export async function submitLogout() {
-  redirectToLogin()
+  redirectToPilarGroup()
   return null
 }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import BackgroundMain from './templateComponents/BackgroundMain'
 import Sidebar from './templateComponents/Sidebar'
 import Header from './templateComponents/Header'
 import './templateComponents/templateComponents.css'
@@ -46,6 +47,7 @@ export default function Layout({ children, currentMenu, onMenuChange }) {
 
   return (
     <div className={`dashboard-shell${collapsed ? ' dashboard-shell--sidebar-collapsed' : ''}`}>
+      <BackgroundMain />
       <Sidebar
         collapsed={collapsed}
         mobileOpen={mobileOpen}
@@ -65,6 +67,14 @@ export default function Layout({ children, currentMenu, onMenuChange }) {
         <main className="dashboard-main">
           {children}
         </main>
+        <footer className="dashboard-footer">
+          <p className="dashboard-footer__line">
+            &copy; 2026 PT Pilar Niaga Makmur. All rights reserved.
+          </p>
+          <p className="dashboard-footer__line">
+            Developed by IT Team PT Pilar Niaga Makmur.
+          </p>
+        </footer>
       </div>
     </div>
   )
