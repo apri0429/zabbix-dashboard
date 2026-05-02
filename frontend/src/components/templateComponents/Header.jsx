@@ -9,6 +9,7 @@ import {
   XClose,
 } from '@untitledui/icons'
 
+import logoPiagamSvg from './assets/logo-piagam.svg'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
@@ -22,11 +23,8 @@ const headerLogos = import.meta.glob('./assets/logo-piagam*.png', {
   import: 'default',
 })
 
-const brandLogoSrc =
-  headerLogos['./assets/logo-piagam.png'] ?? headerLogos['./assets/logo-piagam2.png'] ?? ''
-
 const accentLogoSrc =
-  headerLogos['./assets/logo-piagam2.png'] ?? headerLogos['./assets/logo-piagam.png'] ?? ''
+  headerLogos['./assets/logo-piagam2.png'] ?? logoPiagamSvg
 
 function Header({
   breadcrumb = [
@@ -275,9 +273,7 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            {brandLogoSrc ? (
-              <img src={brandLogoSrc} alt="Logo Piagam" className="header-brand-logo" />
-            ) : null}
+            <img src={logoPiagamSvg} alt="Logo Piagam" className="header-brand-logo" />
           </div>
         </div>
 
