@@ -9,7 +9,7 @@ import {
   XClose,
 } from '@untitledui/icons'
 
-import logoPiagam from './assets/logo-piagam.png'
+import logoPiagamSvg from './assets/logo-piagam.svg'
 import logoPiagam2Svg from './assets/logo-piagam2.svg'
 import './templateComponents.css'
 import {
@@ -264,7 +264,7 @@ function Header({
           ) : null}
 
           <div className="header-brand">
-            <img src={logoPiagam} alt="Logo Piagam" className="header-brand-logo" />
+            <img src={logoPiagamSvg} alt="Logo Piagam" className="header-brand-logo" />
           </div>
         </div>
 
