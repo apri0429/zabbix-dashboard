@@ -8,12 +8,14 @@ const PATH_TO_KEY = {
   '/dashboard': 'dashboard',
   '/user-active': 'user-active',
   '/live-bandwidth': 'live-bandwidth',
+  '/mikrotik': 'mikrotik',
 }
 
 const KEY_TO_TITLE = {
   dashboard: 'Dashboard',
   'user-active': 'User Active',
   'live-bandwidth': 'Live Bandwidth',
+  mikrotik: 'Mikrotik',
 }
 
 const defaultPath = '/dashboard'
@@ -66,14 +68,6 @@ export default function Layout({ children, currentMenu, onMenuChange }) {
         />
         <main className="dashboard-main">
           {children}
-          <footer className="dashboard-footer">
-            <p className="dashboard-footer__line">
-              &copy; 2026 PT Pilar Niaga Makmur. All rights reserved.
-            </p>
-            <p className="dashboard-footer__line">
-              Developed by IT Team PT Pilar Niaga Makmur.
-            </p>
-          </footer>
         </main>
       </div>
     </div>

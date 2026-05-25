@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChartSquare02,
+  CpuChip01,
   LogOut01,
   Users01,
 } from '@untitledui/icons'
@@ -10,6 +11,7 @@ export const implementedNavigationPaths = [
   '/dashboard',
   '/user-active',
   '/live-bandwidth',
+  '/mikrotik',
 ]
 
 export const primaryNavigationItems = [
@@ -28,11 +30,16 @@ export const primaryNavigationItems = [
     href: '/live-bandwidth',
     icon: Activity,
   },
+  {
+    label: 'Mikrotik',
+    href: '/mikrotik',
+    icon: CpuChip01,
+  },
 ]
 
 export const secondaryNavigationItems = [
   {
-    label: 'Kembali ke Pilar Group',
+    label: 'Pilargroup',
     href: '/logout',
     icon: LogOut01,
     variant: 'danger',

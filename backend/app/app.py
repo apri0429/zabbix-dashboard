@@ -13,6 +13,9 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 import requests
 import matplotlib
 matplotlib.use("Agg")
@@ -33,9 +36,9 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 try:
-    from .mikrotik import get_dhcp_active, get_queue_tree
+    from .mikrotik import get_dhcp_active, get_queue_tree, get_router_status
 except ImportError:
-    from mikrotik import get_dhcp_active, get_queue_tree
+    from mikrotik import get_dhcp_active, get_queue_tree, get_router_status
 
 
 ZABBIX_URL = os.getenv("ZABBIX_URL", "http://192.168.1.233/zabbix")
@@ -150,6 +153,49 @@ ID_TO_IND_MONTH = {
 }
 
 app = FastAPI(title="Zabbix Report Backend", version="6.0.0-multi-history")
+
+# ─────────────────────────────────────────────
+#  SCHEDULED WEEKLY REPORT  (every Monday 10:00)
+# ─────────────────────────────────────────────
+
+def _auto_send_weekly_report():
+    """Generate 7-day report and send email. Runs every Monday at 10:00."""
+    end_dt   = datetime.datetime.now().replace(second=0, microsecond=0)
+    start_dt = end_dt - datetime.timedelta(days=7)
+    logging.info("Scheduled report: generating %s → %s", start_dt, end_dt)
+    try:
+        ensure_output_dir()
+        summary = build_summary(start_dt, end_dt)
+        if not summary:
+            logging.warning("Scheduled report: no Zabbix data available — email not sent")
+            return
+        make_chart(summary, CHART_PATH)
+        make_pie(summary, PIE_PATH)
+        make_pdf(summary, start_dt, end_dt, REPORT_PATH)
+        send_email(summary, start_dt, end_dt, REPORT_PATH)
+        logging.info("Scheduled report: email sent to %s", TO_EMAIL)
+    except Exception:
+        logging.exception("Scheduled report: failed")
+
+
+_scheduler = BackgroundScheduler(timezone="Asia/Jakarta")
+_scheduler.add_job(
+    _auto_send_weekly_report,
+    CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="Asia/Jakarta"),
+    id="weekly_report",
+    replace_existing=True,
+)
+
+
+@app.on_event("startup")
+def _start_scheduler():
+    _scheduler.start()
+    logging.info("Scheduler started — weekly report runs every Monday 10:00 WIB")
+
+
+@app.on_event("shutdown")
+def _stop_scheduler():
+    _scheduler.shutdown(wait=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1413,6 +1459,28 @@ def build_weighted_breakdown(summary: List[Dict]) -> List[Dict]:
     return result
 
 
+@app.get("/api/schedule/info")
+def api_schedule_info():
+    job = _scheduler.get_job("weekly_report")
+    next_run = job.next_run_time.strftime("%A, %d %b %Y %H:%M %Z") if job and job.next_run_time else "–"
+    return {
+        "schedule": "Setiap Senin pukul 10:00 WIB",
+        "next_run": next_run,
+        "recipients": TO_EMAIL,
+    }
+
+
+@app.post("/api/schedule/trigger-now")
+def api_schedule_trigger_now():
+    """Trigger pengiriman laporan mingguan sekarang (untuk testing)."""
+    try:
+        _auto_send_weekly_report()
+        return {"success": True, "message": f"Laporan berhasil dikirim ke: {', '.join(TO_EMAIL)}"}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/info")
 def root():
     return {
@@ -1457,6 +1525,16 @@ def api_mikrotik_dhcp_active(router_id: int | None = None):
 def api_mikrotik_queue_tree(router_id: int | None = None):
     try:
         data = get_queue_tree(router_id)
+        return {"success": True, "count": len(data), "data": data}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/mikrotik/status")
+def api_mikrotik_status():
+    try:
+        data = get_router_status()
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         traceback.print_exc()

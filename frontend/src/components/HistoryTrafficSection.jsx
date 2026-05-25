@@ -112,7 +112,7 @@ const TimeAxisTick = ({ x, y, payload }) => {
 const MetricCard = ({ label, value, color, bgColor, borderColor }) => (
   <div style={{
     flex: "1 1 calc(50% - 6px)",
-    minWidth: 130,
+    minWidth: 0,
     borderRadius: 16,
     padding: "14px 14px 12px",
     background: bgColor,
@@ -129,14 +129,14 @@ const MetricCard = ({ label, value, color, bgColor, borderColor }) => (
         {label}
       </span>
     </div>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
       <span style={{
-        fontSize: 26, fontWeight: 700, color: C.textPrimary,
+        fontSize: "clamp(18px, 5vw, 26px)", fontWeight: 700, color: C.textPrimary,
         lineHeight: 1, fontVariantNumeric: "tabular-nums",
       }}>
         {Number(value || 0).toFixed(1)}
       </span>
-      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 600 }}>Mbps</span>
+      <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>Mbps</span>
     </div>
   </div>
 );
@@ -192,16 +192,6 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect }) => {
           : "0 1px 3px rgba(35,57,113,0.08)",
       }}
     >
-      {/* Top accent bar (inactive) */}
-      {!isActive && (
-        <div style={{
-          position: "absolute", top: 0, left: 0, right: 0, height: 3,
-          borderRadius: "16px 16px 0 0",
-          background: "linear-gradient(90deg, #233971 0%, #3d5ca8 100%)",
-          opacity: 0.45,
-          pointerEvents: "none",
-        }} />
-      )}
       {/* Background icon watermark (inactive) */}
       {!isActive && (
         <svg width="58" height="58" viewBox="0 0 24 24" fill="none"
@@ -594,6 +584,8 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
             scrollbarWidth: "none",
             msOverflowStyle: "none",
             paddingBottom: isDesktop ? 0 : 4,
+            width: "100%",
+            minWidth: 0,
           }}>
             {hostList.map((host, i) => {
               const summaryRow = summaryRows.find((s) => s.label === host);
@@ -692,7 +684,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
         position: "relative",
       }}>
         {chartMode === "smooth" ? (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={420}>
             <AreaChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 6 }}>
               <defs>
                 {/* ── Fill utama Download (tipis, natural) ── */}
@@ -813,7 +805,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
             </AreaChart>
           </ResponsiveContainer>
         ) : (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={420}>
             <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 6 }}>
               {commonAxis.grid}
               {commonAxis.xAxis}
@@ -882,10 +874,12 @@ const Card = ({ children, style }) => (
   <div style={{
     background: "linear-gradient(180deg, #ffffff 0%, #fafcff 100%)",
     border: "1px solid rgba(35,57,113,0.18)",
-    borderTop: "3px solid #233971",
     borderRadius: 20,
     padding: "20px 16px",
     overflow: "hidden",
+    minWidth: 0,
+    maxWidth: "100%",
+    boxSizing: "border-box",
     boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.08),0 20px 40px -8px rgba(0,0,0,0.09)",
     ...style,
   }}>

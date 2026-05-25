@@ -273,3 +273,59 @@ def get_queue_tree(router_id=None):
                 conn.disconnect()
 
     return results
+
+
+def get_router_status():
+    routers = get_mikrotik_configs()
+    results = []
+
+    for router in routers:
+        conn = None
+        try:
+            conn = connect_mikrotik(router)
+            api = conn.get_api()
+            resources = api.get_resource("/system/resource").get()
+            res = resources[0] if resources else {}
+
+            total_mem = int(res.get("total-memory", 0))
+            free_mem = int(res.get("free-memory", 0))
+            used_mem = total_mem - free_mem
+
+            results.append({
+                "router_id": router["id"],
+                "router_name": router["name"],
+                "router_host": router["host"],
+                "online": True,
+                "cpu_load": int(res.get("cpu-load", 0)),
+                "uptime": res.get("uptime", ""),
+                "free_memory": free_mem,
+                "total_memory": total_mem,
+                "used_memory": used_mem,
+                "board_name": res.get("board-name", ""),
+                "version": res.get("version", ""),
+                "architecture": res.get("architecture-name", ""),
+            })
+        except Exception as e:
+            results.append({
+                "router_id": router["id"],
+                "router_name": router["name"],
+                "router_host": router["host"],
+                "online": False,
+                "cpu_load": 0,
+                "uptime": "",
+                "free_memory": 0,
+                "total_memory": 0,
+                "used_memory": 0,
+                "board_name": "",
+                "version": "",
+                "architecture": "",
+                "error": str(e),
+            })
+        finally:
+            if conn:
+                try:
+                    conn.disconnect()
+                except Exception:
+                    pass
+
+    return results

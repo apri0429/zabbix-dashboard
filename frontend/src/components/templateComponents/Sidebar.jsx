@@ -314,6 +314,13 @@ function Sidebar({
             onToggleGroup={handleToggleGroup}
           />
         ))}
+        {!collapsed && (
+          <div className="sidebar-pt-footer" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p style={{ margin: 0, fontSize: 10.5, color: "rgba(255,255,255,0.45)", fontWeight: 600, lineHeight: 1.5 }}>
+              Pilargroup
+            </p>
+          </div>
+        )}
       </div>
     </aside>
   )

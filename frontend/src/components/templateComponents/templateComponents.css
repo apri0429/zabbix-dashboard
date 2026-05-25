@@ -3048,6 +3048,10 @@ select {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 
+  .sidebar-pt-footer {
+    display: none;
+  }
+
   .sidebar.mobile-open {
     transform: translateX(0);
   }

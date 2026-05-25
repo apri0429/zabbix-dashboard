@@ -9,8 +9,8 @@ import {
   XClose,
 } from '@untitledui/icons'
 
-import logoPiagamSvg from './assets/logo-piagam.svg'
-import logoPiagam2Svg from './assets/logo-piagam2.svg'
+import logoPiagamSvg from './assets/logo-piagam.png'
+import logoPiagam2Svg from './assets/logo-piagam2.png'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
