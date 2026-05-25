@@ -4,9 +4,9 @@ setlocal
 set SERVICE_NAME=ZabbixDashboard
 set DISPLAY_NAME=Zabbix Dashboard API
 set DESCRIPTION=Zabbix Dashboard Backend API - Auto Report & Mikrotik Monitor
-set APP_DIR=C:\Users\IT\Documents\zabbix-dashboard\backend\app
-set UVICORN=C:\Users\IT\AppData\Local\Programs\Python\Python314\Scripts\uvicorn.exe
-set UVICORN_ARGS=app:app --host 0.0.0.0 --port 8095
+set APP_DIR=C:\zabbix-dashboard\backend\app
+set PYTHON=C:\laragon\bin\python\python-3.10\python.exe
+set UVICORN_ARGS=-m uvicorn app:app --host 0.0.0.0 --port 8095
 
 echo ============================================
 echo   Install Zabbix Dashboard sebagai Service
@@ -36,9 +36,9 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Cek apakah uvicorn ada
-if not exist "%UVICORN%" (
-    echo [ERROR] uvicorn tidak ditemukan di: %UVICORN%
+:: Cek apakah Python ada
+if not exist "%PYTHON%" (
+    echo [ERROR] Python tidak ditemukan di: %PYTHON%
     pause
     exit /b 1
 )
@@ -53,7 +53,7 @@ if %errorlevel% equ 0 (
 )
 
 echo [INFO] Menginstall service...
-nssm install %SERVICE_NAME% "%UVICORN%"
+nssm install %SERVICE_NAME% "%PYTHON%"
 nssm set %SERVICE_NAME% AppParameters %UVICORN_ARGS%
 nssm set %SERVICE_NAME% AppDirectory "%APP_DIR%"
 nssm set %SERVICE_NAME% DisplayName "%DISPLAY_NAME%"
