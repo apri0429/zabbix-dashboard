@@ -4,9 +4,11 @@ import Dashboard from "./pages/Dashboard";
 import DhcpActive from "./pages/DhcpActive";
 import Livebandwotdh from "./pages/Livebanditdh";
 import MikrotikStatus from "./pages/MikrotikStatus";
+import NocView from "./pages/NocView";
 
 const PAGE_TITLES = {
   "dashboard":      "Dashboard",
+  "noc":            "NOC Monitor",
   "user-active":    "User Active",
   "live-bandwidth": "Live Bandwidth",
   "mikrotik":       "Mikrotik",
@@ -23,6 +25,8 @@ export default function App() {
     >
       {currentMenu === "dashboard" ? (
         <Dashboard />
+      ) : currentMenu === "noc" ? (
+        <NocView />
       ) : currentMenu === "user-active" ? (
         <DhcpActive />
       ) : currentMenu === "live-bandwidth" ? (

@@ -3,12 +3,14 @@ import {
   BarChartSquare02,
   CpuChip01,
   LogOut01,
+  Monitor01,
   Users01,
 } from '@untitledui/icons'
 
 export const defaultNavigationPath = '/dashboard'
 export const implementedNavigationPaths = [
   '/dashboard',
+  '/noc',
   '/user-active',
   '/live-bandwidth',
   '/mikrotik',
@@ -19,6 +21,11 @@ export const primaryNavigationItems = [
     label: 'Dashboard',
     href: '/dashboard',
     icon: BarChartSquare02,
+  },
+  {
+    label: 'NOC Monitor',
+    href: '/noc',
+    icon: Monitor01,
   },
   {
     label: 'User Active',

@@ -132,34 +132,6 @@ const DonutTooltip = ({ active, payload }) => {
   );
 };
 
-/* ─── Stat Cards ─── */
-const STAT_THEME = {
-  "Total Host": { color: T.navy,     chipBg:"rgba(26,42,87,0.08)",    chipBorder:"rgba(26,42,87,0.18)" },
-  "Stabil":     { color: "#18786e",  chipBg:"rgba(42,157,143,0.10)",  chipBorder:"rgba(42,157,143,0.22)" },
-  "Padat":      { color: "#8a680f",  chipBg:"rgba(233,196,106,0.18)", chipBorder:"rgba(233,196,106,0.30)" },
-  "Tinggi":     { color: "#b42318",  chipBg:"rgba(231,111,81,0.12)",  chipBorder:"rgba(231,111,81,0.24)" },
-};
-
-const StatCard = ({ label, value, sublabel, compact }) => {
-  const t = STAT_THEME[label] || STAT_THEME["Total Host"];
-  return (
-    <div className="dashboard-card" style={{ gap: compact ? 6 : 12 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <p className="dashboard-card__label" style={{ fontSize: compact ? 10.5 : undefined }}>{label}</p>
-        {!compact && (
-          <span style={{ display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:99, fontSize:11, fontWeight:700, color:t.color, background:t.chipBg, border:`1px solid ${t.chipBorder}` }}>
-            <Dot color={t.color} size={5} />
-            {label}
-          </span>
-        )}
-        {compact && <Dot color={t.color} size={7} />}
-      </div>
-      <strong className="dashboard-card__value" style={{ color: t.color, fontSize: compact ? "1.45rem" : undefined }}>{value}</strong>
-      <p className="dashboard-card__detail" style={{ margin:0, fontSize: compact ? 11 : 12 }}>{sublabel}</p>
-    </div>
-  );
-};
-
 /* ─── Traffic Bar Chart ─── */
 const TrafficChart = ({ rows = [], isMobile }) => {
   const data = useMemo(() => rows.map((r) => ({
@@ -343,38 +315,83 @@ const SummaryTable = ({ rows = [], isMobile }) => {
     </div>
   );
 
-  const cols = [
-    { key:"label",          label:"Host / ISP",  render:(r) => shortLabel(r.label) },
-    { key:"capacity",       label:"Cap (Mbps)",  render:(r) => r.capacity },
-    { key:"avg_download",   label:"Avg DL",      render:(r) => mbps(r.avg_download) },
-    { key:"avg_upload",     label:"Avg UL",      render:(r) => mbps(r.avg_upload) },
-    { key:"peak_download",  label:"Peak DL",     render:(r) => mbps(r.peak_download) },
-    { key:"peak_upload",    label:"Peak UL",     render:(r) => mbps(r.peak_upload) },
-    { key:"weighted_score", label:"Score",       render:(r) => `${r.weighted_score}%` },
-    { key:"status",         label:"Status",      render:(r) => <StatusBadge status={r.status} /> },
+  const heads  = ["Host / ISP", "Cap", "Avg DL", "Avg UL", "Peak DL", "Peak UL", "Score", "Status"];
+  const numCols = [
+    { key:"capacity",      cap:true },
+    { key:"avg_download"  },
+    { key:"avg_upload"    },
+    { key:"peak_download" },
+    { key:"peak_upload"   },
   ];
-  const monoKeys = new Set(["capacity","avg_download","avg_upload","peak_download","peak_upload","weighted_score"]);
+  const align = (i) => (i === 0 ? "left" : i === 7 ? "center" : "right");
 
   return (
-    <div className="users-table-wrapper">
-      <table className="users-table">
+    <div style={{
+      marginTop:22, overflowX:"auto",
+      border:`1px solid ${T.border}`, borderRadius:18, background:T.surface,
+      boxShadow:"0 1px 3px rgba(26,42,87,0.05)",
+    }}>
+      <table style={{ width:"100%", minWidth:840, borderCollapse:"separate", borderSpacing:0, fontSize:13 }}>
         <thead>
-          <tr>{cols.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+          <tr>
+            {heads.map((h, i) => (
+              <th key={h} style={{
+                padding:"13px 16px", textAlign:align(i), whiteSpace:"nowrap",
+                fontSize:10.5, fontWeight:700, letterSpacing:"0.07em", textTransform:"uppercase",
+                color:T.muted, fontFamily:"'IBM Plex Mono',monospace",
+                background:"linear-gradient(180deg, rgba(26,42,87,0.055), rgba(26,42,87,0.02))",
+                borderBottom:`1px solid ${T.borderMid}`,
+              }}>{h}</th>
+            ))}
+          </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              {cols.map((c) => (
-                <td key={c.key} style={{
-                  fontFamily: monoKeys.has(c.key) ? "'IBM Plex Mono',monospace" : "inherit",
-                  fontWeight: c.key === "label" ? 600 : 400,
-                  color: c.key === "label" ? T.text : T.textSoft,
-                }}>
-                  {c.render(r)}
+          {rows.map((r, i) => {
+            const s     = STATUS[r.status] || STATUS.STABIL;
+            const score = Number(r.weighted_score || 0);
+            const last  = i === rows.length - 1;
+            const base  = i % 2 ? "rgba(26,42,87,0.018)" : T.surface;
+            const bb    = last ? "none" : `1px solid ${T.border}`;
+            return (
+              <tr key={i} style={{ background:base, transition:"background 0.15s ease" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(42,157,143,0.07)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = base; }}>
+                <td style={{ padding:"12px 16px", borderBottom:bb, whiteSpace:"nowrap" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ width:8, height:8, borderRadius:"50%", background:s.color, flexShrink:0, boxShadow:`0 0 0 3px ${s.bg}` }} />
+                    <span style={{ fontWeight:600, color:T.text }}>{shortLabel(r.label)}</span>
+                    {r.vpn_measured && (
+                      <span title="Latency/loss diukur lewat VPN — bobot kualitas dikecilkan" style={{ fontSize:9, fontWeight:700, color:T.muted, border:`1px solid ${T.border}`, borderRadius:4, padding:"1px 4px" }}>VPN</span>
+                    )}
+                    {r.is_standby && (
+                      <span title={r.standby_note} style={{ fontSize:9, fontWeight:700, color:"#18786e", border:"1px solid #18786e55", borderRadius:4, padding:"1px 4px" }}>CADANGAN</span>
+                    )}
+                  </div>
                 </td>
-              ))}
-            </tr>
-          ))}
+                {numCols.map((c) => (
+                  <td key={c.key} style={{
+                    padding:"12px 16px", borderBottom:bb, textAlign:"right", whiteSpace:"nowrap",
+                    fontFamily:"'IBM Plex Mono',monospace", color: c.cap ? T.muted : T.textSoft,
+                  }}>
+                    {c.cap ? r.capacity : Number(r[c.key] || 0).toFixed(1)}
+                    {!c.cap && <span style={{ color:T.muted, fontSize:10, marginLeft:3 }}>M</span>}
+                  </td>
+                ))}
+                <td style={{ padding:"12px 16px", borderBottom:bb }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"flex-end" }}>
+                    <div style={{ width:56, height:5, borderRadius:99, background:"rgba(26,42,87,0.08)", overflow:"hidden", flexShrink:0 }}>
+                      <div style={{ height:"100%", width:`${Math.min(score,100)}%`, background:s.color, borderRadius:99, transition:"width 0.5s ease" }} />
+                    </div>
+                    <span style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, color:s.color, fontSize:12.5, minWidth:40, textAlign:"right" }}>{score}%</span>
+                  </div>
+                </td>
+                <td style={{ padding:"12px 16px", borderBottom:bb, textAlign:"center" }}
+                    title={r.status_reason ? `Pemicu status: ${r.status_reason}` : undefined}>
+                  <StatusBadge status={r.status} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -408,16 +425,25 @@ const BreakdownGrid = ({ items = [] }) => {
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {[
-                { label:"Max Avg", pct:item.max_avg_pct, comp:item.avg_component, weight:"60%" },
-                { label:"Max P95", pct:item.max_peak_pct, comp:item.peak_component, weight:"40%" },
+                { label:"Utilisasi", pct:item.util_score, comp:item.util_component, weight:"80%" },
+                { label:"Kualitas link", pct:item.quality_penalty, comp:item.quality_component, weight:"20%" },
               ].map((cc) => (
                 <div key={cc.label} style={{ padding:"10px 12px", borderRadius:9, background:T.surface, border:`1px solid ${T.border}` }}>
                   <div style={{ fontSize:10, color:T.muted, marginBottom:4, fontWeight:600 }}>{cc.label} <span style={{ opacity:.55 }}>× {cc.weight}</span></div>
-                  <div style={{ fontSize:15, fontWeight:700, color:T.text, fontFamily:"'IBM Plex Mono',monospace" }}>{cc.pct}%</div>
-                  <div style={{ fontSize:11, color:s.color, fontWeight:600, marginTop:2 }}>= {cc.comp}%</div>
+                  <div style={{ fontSize:15, fontWeight:700, color:T.text, fontFamily:"'IBM Plex Mono',monospace" }}>{cc.pct}</div>
+                  <div style={{ fontSize:11, color:s.color, fontWeight:600, marginTop:2 }}>= {cc.comp}</div>
                 </div>
               ))}
             </div>
+            <div style={{ fontSize:10, color:T.muted, lineHeight:1.5 }}>
+              Utilisasi = 0.50·Avg({item.max_avg_pct}%) + 0.35·P95({item.max_peak_pct}%) + 0.15·Peak({item.max_peakraw_pct}%).
+              Kualitas = maks(latency {item.latency_penalty}, loss {item.loss_penalty}).
+            </div>
+            {item.status_reason && (
+              <div style={{ fontSize:10.5, color:s.color, fontWeight:600, lineHeight:1.5 }}>
+                Pemicu status: {item.status_reason}.
+              </div>
+            )}
           </div>
         );
       })}
@@ -537,8 +563,11 @@ export default function Dashboard() {
 
   const { isMobile, isTablet } = useBreakpoint();
 
-  const [startDate, setStartDate] = useState(now.subtract(7, "day").format("YYYY-MM-DDTHH:mm"));
-  const [endDate, setEndDate]     = useState(maxDate);
+  // Default: laporan harian — kemarin 03:00 s/d hari ini 00:00
+  const [startDate, setStartDate] = useState(
+    now.startOf("day").subtract(1, "day").add(3, "hour").format("YYYY-MM-DDTHH:mm")
+  );
+  const [endDate, setEndDate]     = useState(now.startOf("day").format("YYYY-MM-DDTHH:mm"));
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
   const [report, setReport]       = useState(null);
@@ -560,7 +589,7 @@ export default function Dashboard() {
   };
 
   const handleExportPdf = () =>
-    window.open(`${API_BASE}/api/report/export-pdf?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`, "_blank");
+    window.open(`${API_BASE}/api/report/export-pdf?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}&_=${Date.now()}`, "_blank");
 
   const handleSendEmail = async () => {
     try {
@@ -573,13 +602,6 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-
-  const stats = useMemo(() => [
-    { label:"Total Host", value: report?.total_host ?? "–",              sublabel:"Host terpantau" },
-    { label:"Stabil",     value: report?.status_count?.STABIL ?? "–",    sublabel:"Score ≤ 60%" },
-    { label:"Padat",      value: report?.status_count?.PADAT  ?? "–",    sublabel:"Score 60–80%" },
-    { label:"Tinggi",     value: report?.status_count?.TINGGI ?? "–",    sublabel:"Score > 80%" },
-  ], [report]);
 
   const historyChartData = useMemo(() => report?.history_chart || [], [report]);
   const historyMeta      = useMemo(() => report?.history_meta || null, [report]);
@@ -651,11 +673,6 @@ export default function Dashboard() {
           </svg>
           <span style={{ lineHeight:1.5 }}>{error}</span>
         </div>
-      </div>
-
-      {/* ── Stat Cards ── */}
-      <div style={{ display:"grid", gridTemplateColumns: isMobile?"1fr 1fr":"repeat(4,1fr)", gap: isMobile?10:gap, opacity: loading ? 0.55 : 1, transition:"opacity 0.2s" }}>
-        {stats.map((s) => <StatCard key={s.label} {...s} compact={isMobile} />)}
       </div>
 
       {/* ── History Traffic ── */}

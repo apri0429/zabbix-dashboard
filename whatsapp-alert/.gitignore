@@ -1,0 +1,3 @@
+# WhatsApp Web session – JANGAN di-commit (bisa dipakai login akun WA)
+.wwebjs_auth/
+.wwebjs_cache/

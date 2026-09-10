@@ -4,4 +4,7 @@ python-dotenv
 routeros-api
 requests
 fpdf2
+Pillow
 matplotlib
+apscheduler
+# anthropic  # opsional: hanya kalau pakai ANTHROPIC_API_KEY (Gemini via REST, tak butuh paket)

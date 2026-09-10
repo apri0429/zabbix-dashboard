@@ -6,6 +6,7 @@ import './templateComponents/templateComponents.css'
 
 const PATH_TO_KEY = {
   '/dashboard': 'dashboard',
+  '/noc': 'noc',
   '/user-active': 'user-active',
   '/live-bandwidth': 'live-bandwidth',
   '/mikrotik': 'mikrotik',
@@ -13,6 +14,7 @@ const PATH_TO_KEY = {
 
 const KEY_TO_TITLE = {
   dashboard: 'Dashboard',
+  noc: 'NOC Monitor',
   'user-active': 'User Active',
   'live-bandwidth': 'Live Bandwidth',
   mikrotik: 'Mikrotik',
