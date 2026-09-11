@@ -469,6 +469,9 @@ export default function NocView() {
   const [histKind, setHistKind] = useState("ALL");
   const [histStatus, setHistStatus] = useState("ALL");
   const [recent, setRecent] = useState([]);
+  const [recentBlackouts, setRecentBlackouts] = useState([]);
+  const [histBlackouts, setHistBlackouts] = useState([]);
+  const [statBlackouts, setStatBlackouts] = useState([]);
   const [trend, setTrend] = useState({});
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState(null);
@@ -505,6 +508,7 @@ export default function NocView() {
     try {
       const { data } = await axios.get(`${API_BASE}/api/noc/history`, { params: { days: 1 }, timeout: 20000 });
       setRecent(data.events || []);
+      setRecentBlackouts(data.blackouts || []);
     } catch { /* diamkan — panel live tetap jalan */ }
     try {
       const { data } = await axios.get(`${API_BASE}/api/noc/trend`, { params: { minutes: 120 }, timeout: 20000 });
@@ -518,6 +522,7 @@ export default function NocView() {
     try {
       const { data } = await axios.get(`${API_BASE}/api/noc/stats`, { params: { kind: "site", days: 7 }, timeout: 20000 });
       setStats(data.stats || []);
+      setStatBlackouts(data.blackouts || []);
     } catch (err) {
       setStatsErr(err?.response?.data?.detail || err?.message || "Gagal memuat statistik");
     }
@@ -529,6 +534,7 @@ export default function NocView() {
     try {
       const { data } = await axios.get(`${API_BASE}/api/noc/history`, { params: { days: 7 }, timeout: 20000 });
       setHistory(data.events || []);
+      setHistBlackouts(data.blackouts || []);
     } catch (err) {
       setHistoryErr(err?.response?.data?.detail || err?.message || "Gagal memuat riwayat");
     }
@@ -606,6 +612,28 @@ export default function NocView() {
   }, [recent, pal]);
   const incOngoing = incidents.filter((x) => x.ongoing).length;
   const incRecovered = incidents.length - incOngoing;
+
+  // Blackout = periode pemantauan mati (server dimatikan / backend down). Status
+  // perangkat selama rentang ini memang tidak tercatat — ditandai eksplisit biar
+  // nggak disangka "semua normal".
+  const fmtBlackout = (b) => {
+    const s = hhmm(b.started_at), e = hhmm(b.ended_at);
+    const sameDay = String(b.started_at).slice(0, 10) === String(b.ended_at).slice(0, 10);
+    const eLabel = sameDay ? e : `${e} (${String(b.ended_at).slice(0, 10)})`;
+    return {
+      id: `bo-${b.started_at}`,
+      blackout: true,
+      when: b.ended_at || b.started_at,
+      from: s, to: eLabel,
+      dur: fmtAge(b.seconds),
+      desc: `Pemantauan berhenti pukul ${s}–${eLabel} (server mati). Perangkat yang masih bermasalah setelah jeda tetap dihitung terganggu sejak sebelum jeda; hanya kejadian singkat yang murni di dalam jeda ini yang mungkin tidak tercatat.`,
+    };
+  };
+  const logRows = useMemo(() => {
+    const bos = (recentBlackouts || []).map(fmtBlackout);
+    return [...incidents, ...bos].sort((a, b) => String(b.when).localeCompare(String(a.when)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incidents, recentBlackouts]);
 
   const exportIncidents = () => {
     const rows = incidents.map((x) => ({
@@ -830,7 +858,7 @@ export default function NocView() {
               </div>
             )}
           />
-          {incidents.length === 0 ? (
+          {logRows.length === 0 ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: pal.UP, minHeight: isFs ? 92 : 120 }}>
               <span style={{ width: isFs ? 54 : 44, height: isFs ? 54 : 44, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: pal.STATE_META.UP.bg }}>
                 <CheckCircle width={isFs ? 28 : 24} height={isFs ? 28 : 24} />
@@ -855,11 +883,39 @@ export default function NocView() {
                 <span>Status</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {incidents.map((x, i) => (
+                {logRows.map((x, i) => x.blackout ? (
+                  <div key={x.id} className="noc-logrow" style={{
+                    display: "flex", gap: 10, alignItems: "flex-start",
+                    padding: isFs ? "9px 4px" : "8px 4px",
+                    borderBottom: i === logRows.length - 1 ? "none" : `1px solid ${pal.border}`,
+                    background: `${pal.WARN}0d`,
+                  }}>
+                    <span style={{
+                      width: isFs ? 78 : 62, flexShrink: 0, marginTop: 1,
+                      fontSize: isFs ? 12.5 : 10.5, fontWeight: 700, color: pal.WARN,
+                      fontFamily: "'IBM Plex Mono', monospace",
+                    }}>{x.from}</span>
+                    <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: isFs ? 13 : 11.5, fontWeight: 800, color: pal.WARN, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <AlertTriangle width={12} height={12} /> Pemantauan berhenti
+                        <span style={{ fontSize: isFs ? 11 : 9.5, fontWeight: 700, color: pal.muted }}>· {x.dur}</span>
+                      </span>
+                      <span style={{ fontSize: isFs ? 11.5 : 10, color: pal.textSoft, lineHeight: 1.4, overflowWrap: "anywhere" }}>
+                        {x.desc}
+                      </span>
+                    </span>
+                    <span style={{
+                      flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3,
+                      fontSize: 9, fontWeight: 800, letterSpacing: "0.04em",
+                      padding: "2px 7px", borderRadius: 4, whiteSpace: "nowrap", marginTop: 1,
+                      color: pal.WARN, background: `${pal.WARN}1f`,
+                    }}>BLACKOUT</span>
+                  </div>
+                ) : (
                   <div key={x.id} className="noc-logrow" style={{
                     display: "flex", gap: 10, alignItems: "flex-start",
                     padding: isFs ? "9px 2px" : "8px 2px",
-                    borderBottom: i === incidents.length - 1 ? "none" : `1px solid ${pal.border}`,
+                    borderBottom: i === logRows.length - 1 ? "none" : `1px solid ${pal.border}`,
                     animationDelay: `${Math.min(i, 16) * 16}ms`,
                   }}>
                     <span style={{
@@ -1108,7 +1164,15 @@ export default function NocView() {
           const day = String(h.down_at || "").slice(0, 10) || "–";
           (byDay[day] = byDay[day] || []).push(h);
         }
+        const showBo = histKind === "ALL" && histStatus === "ALL" && !q;
+        if (showBo) {
+          for (const b of histBlackouts || []) {
+            const day = String(b.started_at || "").slice(0, 10) || "–";
+            (byDay[day] = byDay[day] || []).push({ _blackout: true, ...b });
+          }
+        }
         const days = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
+        const totalBoSec = (histBlackouts || []).reduce((s, b) => s + (b.seconds || 0), 0);
         const dayLabel = (d) => {
           const dj = dayjs(d);
           if (!dj.isValid()) return d;
@@ -1155,13 +1219,14 @@ export default function NocView() {
                   <button onClick={() => setShowHistory(false)} style={{ ...btnStyle, display: "inline-flex", alignItems: "center", gap: 6, background: LIGHT.surface, color: LIGHT.navy, border: `1px solid ${LIGHT.borderStrong}` }}><XClose width={14} height={14} /> Tutup</button>
                 </div>
               </div>
-              {evList.length > 0 && (
+              {(evList.length > 0 || totalBoSec > 0) && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 12 }}>
                   {[
                     [`${total} kejadian`, LIGHT.navy],
                     ongoingN ? [`${ongoingN} masih down`, LIGHT.DOWN] : ["semua pulih", LIGHT.UP],
                     [`${siteN} site · ${total - siteN} perangkat`, LIGHT.textSoft],
                     worst ? [`terlama ${fmtAge(worst)}`, LIGHT.WARN] : null,
+                    (showBo && totalBoSec > 0) ? [`⚠ tak terpantau ${fmtAge(totalBoSec)}`, LIGHT.WARN] : null,
                   ].filter(Boolean).map(([txt, c], i) => (
                     <span key={i} style={{ fontSize: 10.5, fontWeight: 800, color: c, background: `${c}14`, border: `1px solid ${c}33`, borderRadius: 7, padding: "3px 8px", letterSpacing: "0.02em" }}>{txt}</span>
                   ))}
@@ -1217,7 +1282,7 @@ export default function NocView() {
                 <div style={{ color: LIGHT.DOWN, fontSize: 13, padding: "36px 0", textAlign: "center" }}>{historyErr}</div>
               ) : history === null ? (
                 <div style={{ color: LIGHT.muted, fontSize: 13, padding: "36px 0", textAlign: "center" }}>Memuat…</div>
-              ) : evList.length === 0 ? (
+              ) : days.length === 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "44px 0", color: filtered ? LIGHT.muted : LIGHT.UP }}>
                   <span style={{ width: 52, height: 52, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: filtered ? LIGHT.surfaceAlt : LIGHT.STATE_META.UP.bg }}>
                     {filtered ? <SearchMd width={24} height={24} /> : <CheckCircle width={26} height={26} />}
@@ -1236,8 +1301,28 @@ export default function NocView() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {byDay[day]
                         .slice()
-                        .sort((a, b) => String(b.down_at).localeCompare(String(a.down_at)))
+                        .sort((a, b) => String(b.down_at || b.started_at).localeCompare(String(a.down_at || a.started_at)))
                         .map((h, i) => {
+                          if (h._blackout) return (
+                            <div key={i} className="noc-card" style={{
+                              display: "flex", alignItems: "center", gap: 11, padding: "10px 12px",
+                              borderRadius: 10, border: `1px solid ${LIGHT.WARN}33`, background: `${LIGHT.WARN}0d`,
+                            }}>
+                              <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${LIGHT.WARN}1f`, color: LIGHT.WARN }}>
+                                <AlertTriangle width={16} height={16} />
+                              </span>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 800, color: LIGHT.WARN }}>Pemantauan berhenti</div>
+                                <div style={{ fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>
+                                  {hhmm(h.started_at)} → {hhmm(h.ended_at)} · server mati, kejadian singkat mungkin tak tercatat
+                                </div>
+                              </div>
+                              <span style={{ flexShrink: 0, textAlign: "right", fontSize: 13, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace", color: LIGHT.WARN }}>
+                                {fmtAge(h.seconds)}
+                                <div style={{ fontSize: 8.5, fontWeight: 700, color: LIGHT.muted, letterSpacing: "0.06em", textTransform: "uppercase" }}>tak terpantau</div>
+                              </span>
+                            </div>
+                          );
                           const isSite = h.kind === "site";
                           const Icon = isSite ? MarkerPin05 : Server04;
                           const c = h.ongoing ? LIGHT.DOWN : LIGHT.UP;
@@ -1397,6 +1482,13 @@ export default function NocView() {
                 </div>
                 <div style={{ fontSize: 10.5, color: LIGHT.muted, marginTop: 9, lineHeight: 1.45 }}>
                   Sumber: log Netwatch/Zabbix NOC sejak fitur ini aktif. Site yang belum pernah down tidak muncul (uptime-nya 100%).
+                  {(statBlackouts || []).length > 0 && (
+                    <> Server sempat mati{" "}
+                      <b style={{ color: LIGHT.WARN }}>
+                        (total {fmtAge((statBlackouts || []).reduce((s, b) => s + (b.seconds || 0), 0))} dalam 7 hari)
+                      </b>: perangkat yang masih terganggu setelahnya tetap dihitung sejak sebelum jeda; kejadian singkat yang murni di dalam jeda mungkin tak tercatat.
+                    </>
+                  )}
                 </div>
               </div>
             </div>

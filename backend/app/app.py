@@ -5,6 +5,7 @@ Zabbix Report Backend API - Multi Router History Version
 
 import os
 import re
+import time
 import math
 import base64
 import smtplib
@@ -247,9 +248,35 @@ _scheduler.add_job(
 @app.on_event("startup")
 def _start_scheduler():
     try:
-        noc_history.close_stale_open_events()
+        gap = noc_history.record_monitoring_gap()
+        if gap:
+            logging.warning(
+                "NOC history: jeda pemantauan %s → %s (%ss) — dicatat sebagai blackout",
+                gap["started_at"], gap["ended_at"], gap["seconds"],
+            )
+            # Rekonsiliasi pakai status terkini: perangkat yang masih DOWN dihitung
+            # mati sejak sebelum blackout (event diteruskan). Coba beberapa kali
+            # kalau Zabbix/MikroTik belum siap tepat setelah boot.
+            live = None
+            for _ in range(3):
+                try:
+                    live = build_noc_live()
+                    break
+                except Exception:
+                    time.sleep(5)
+            if live:
+                ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"]}
+                        for s in live.get("sites", [])]
+                ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-", "state": d["state"]}
+                         for d in live.get("devices", [])]
+                noc_history.reconcile_after_gap(ents, gap["started_at"])
+            else:
+                logging.warning("NOC history: status live belum tersedia saat startup — event lama ditutup di titik terakhir")
+                noc_history.close_stale_open_events(close_at=gap["started_at"])
+        else:
+            noc_history.close_stale_open_events()
     except Exception:
-        logging.exception("NOC history: gagal menutup event lama saat startup")
+        logging.exception("NOC history: gagal rekonsiliasi event saat startup")
     _cleanup_noc_history()
     _scheduler.start()
     logging.info(
@@ -3058,6 +3085,12 @@ def _send_noc_alerts(transitions: List[Dict]):
 def _poll_noc_history():
     """Dipanggil berkala oleh scheduler: rekam kalau ada site/perangkat yang
     status-nya berubah sejak polling terakhir (lihat noc_history.py)."""
+    # Deteksi kalau polling sempat berhenti lama (server dimatikan / backend crash)
+    try:
+        noc_history.record_monitoring_gap()
+    except Exception:
+        traceback.print_exc()
+
     try:
         payload = build_noc_live()
     except Exception:
@@ -3125,7 +3158,11 @@ def api_noc_history(kind: Optional[str] = Query(None, pattern="^(site|device)$")
     """Log riwayat downtime: kapan mati, kapan pulih, berapa lama. Lihat
     noc_history.py untuk keterbatasan resolusi & cakupan datanya."""
     try:
-        return {"success": True, "events": noc_history.get_downtime_log(kind=kind, days=days)}
+        return {
+            "success": True,
+            "events": noc_history.get_downtime_log(kind=kind, days=days),
+            "blackouts": noc_history.get_blackouts(days=days),
+        }
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -3145,7 +3182,11 @@ def api_noc_trend(minutes: int = Query(120, ge=15, le=360)):
 def api_noc_stats(kind: Optional[str] = Query(None, pattern="^(site|device)$"), days: int = Query(7, ge=1, le=90)):
     """Ringkasan keandalan per entity: uptime %, jumlah insiden, downtime, MTTR."""
     try:
-        return {"success": True, "days": days, "stats": noc_history.get_uptime_stats(kind=kind, days=days)}
+        return {
+            "success": True, "days": days,
+            "stats": noc_history.get_uptime_stats(kind=kind, days=days),
+            "blackouts": noc_history.get_blackouts(days=days),
+        }
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

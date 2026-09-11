@@ -15,6 +15,16 @@ Keterbatasan yang perlu disadari:
 - Kalau backend restart, event yang masih "berlangsung" saat itu otomatis
   ditutup di titik terakhir sebelum restart (supaya nggak nyangkut open
   selamanya) — durasinya jadi sedikit lebih pendek dari kenyataan.
+
+Buat Log Insiden & statistik supaya jelas & akurat (bukan raw noc_events mentah),
+dua hal berikut diterapkan tiap kali dibaca (lihat _clean_incident_rows):
+- Kedipan sesaat (mis. sempat kejawab 1 ping pas baru boot) yang cuma bertahan
+  <= FLAP_MERGE_GAP_SECONDS sebelum DOWN lagi DIGABUNG ke satu insiden, supaya
+  insiden yang sebenarnya cuma satu (misalnya mati dari jam 4 sore) tidak
+  terpotong-potong jadi banyak baris pendek gara-gara sempat "UP" sesaat.
+- Sesudah digabung, insiden yang SUDAH SELESAI dan durasinya masih di bawah
+  MIN_INCIDENT_SECONDS dibuang (dianggap noise polling, bukan insiden beneran).
+  Insiden yang masih berlangsung tidak pernah dibuang oleh aturan ini.
 """
 
 import os
@@ -80,14 +90,150 @@ def init_db():
                 CREATE INDEX IF NOT EXISTS idx_noc_samples_key_ts
                 ON noc_samples (entity_key, ts)
             """)
+            # Rentang waktu saat pemantauan MATI (backend down / server dimatikan).
+            # Dipakai supaya Log Insiden jujur & perhitungan uptime tidak menghitung
+            # jam-jam yang memang tidak terpantau.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS noc_blackouts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TEXT NOT NULL,   -- aktivitas polling terakhir sebelum mati
+                    ended_at TEXT NOT NULL,     -- saat pemantauan hidup lagi
+                    seconds INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_noc_blackouts_started
+                ON noc_blackouts (started_at)
+            """)
             conn.commit()
         finally:
             conn.close()
         _initialized = True
 
 
+_FMT = "%Y-%m-%d %H:%M:%S"
+
+
 def _now_iso() -> str:
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.datetime.now().strftime(_FMT)
+
+
+# Jarak tanpa polling yang dianggap "pemantauan mati" (bukan sekadar restart cepat).
+MONITOR_GAP_THRESHOLD_SECONDS = 300
+
+
+def _last_activity_iso(conn) -> Optional[str]:
+    """Timestamp terakhir kali polling terbukti aktif — sampel metrik terbaru,
+    fallback ke event terbaru."""
+    row = conn.execute("SELECT MAX(ts) AS t FROM noc_samples").fetchone()
+    if row and row["t"]:
+        return row["t"]
+    row = conn.execute(
+        "SELECT MAX(t) AS t FROM ("
+        "SELECT MAX(started_at) AS t FROM noc_events "
+        "UNION ALL SELECT MAX(ended_at) FROM noc_events)"
+    ).fetchone()
+    return row["t"] if row and row["t"] else None
+
+
+def record_monitoring_gap(reference: Optional[str] = None) -> Optional[Dict]:
+    """Kalau jarak dari aktivitas polling terakhir ke `reference` (default sekarang)
+    melebihi MONITOR_GAP_THRESHOLD_SECONDS, catat sebagai blackout pemantauan.
+    Mengembalikan dict blackout bila tercatat, None kalau tidak ada gap berarti."""
+    init_db()
+    now_dt = datetime.datetime.now()
+    ref_dt = datetime.datetime.strptime(reference, _FMT) if reference else now_dt
+    with _lock:
+        conn = _connect()
+        try:
+            last = _last_activity_iso(conn)
+            if not last:
+                return None
+            last_dt = datetime.datetime.strptime(last, _FMT)
+            gap = (ref_dt - last_dt).total_seconds()
+            if gap <= MONITOR_GAP_THRESHOLD_SECONDS:
+                return None
+            # Sudah ada blackout yang menutup rentang ini? (mis. dipanggil 2x saat startup)
+            dup = conn.execute(
+                "SELECT 1 FROM noc_blackouts WHERE ended_at >= ? LIMIT 1", (last,)
+            ).fetchone()
+            if dup:
+                return None
+            ended = ref_dt.strftime(_FMT)
+            conn.execute(
+                "INSERT INTO noc_blackouts (started_at, ended_at, seconds) VALUES (?, ?, ?)",
+                (last, ended, int(gap)),
+            )
+            conn.commit()
+            return {"started_at": last, "ended_at": ended, "seconds": int(gap)}
+        finally:
+            conn.close()
+
+
+def reconcile_after_gap(entities: List[Dict], gap_start: str):
+    """Dipanggil sekali sesudah blackout, dengan status terkini tiap entity.
+
+    - state SAMA dgn sebelum mati → event lama DITERUSKAN (perangkat yang masih
+      DOWN dihitung mati sejak semalam; yang masih UP dianggap UP selama blackout).
+    - state BEDA → event lama ditutup di `gap_start` (kita tak tahu persisnya),
+      event baru dibuka sekarang.
+    - entity yang hilang → event lama ditutup di `gap_start`.
+    """
+    init_db()
+    now = _now_iso()
+    cur_by_key = {e["key"]: e for e in entities}
+    with _lock:
+        conn = _connect()
+        try:
+            open_rows = conn.execute(
+                "SELECT id, entity_key, entity_name, state FROM noc_events WHERE ended_at IS NULL"
+            ).fetchall()
+            seen = set()
+            for r in open_rows:
+                seen.add(r["entity_key"])
+                cur = cur_by_key.get(r["entity_key"])
+                if cur is None:
+                    conn.execute(
+                        "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE id = ?",
+                        (gap_start, r["id"]),
+                    )
+                    continue
+                if cur["state"] == r["state"]:
+                    if r["entity_name"] != cur["name"]:
+                        conn.execute("UPDATE noc_events SET entity_name = ? WHERE id = ?", (cur["name"], r["id"]))
+                    continue
+                conn.execute(
+                    "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE id = ?",
+                    (gap_start, r["id"]),
+                )
+                conn.execute(
+                    "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) VALUES (?, ?, ?, ?, ?)",
+                    (cur["kind"], cur["key"], cur["name"], cur["state"], now),
+                )
+            for e in entities:
+                if e["key"] not in seen:
+                    conn.execute(
+                        "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) VALUES (?, ?, ?, ?, ?)",
+                        (e["kind"], e["key"], e["name"], e["state"], now),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_blackouts(days: int = 7) -> List[Dict]:
+    init_db()
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime(_FMT)
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT started_at, ended_at, seconds FROM noc_blackouts "
+            "WHERE ended_at >= ? ORDER BY started_at DESC", (cutoff,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"started_at": r["started_at"], "ended_at": r["ended_at"],
+             "seconds": r["seconds"]} for r in rows]
 
 
 def record_snapshot(entities: List[Dict]):
@@ -203,6 +349,75 @@ def get_trend(minutes: int = 120, max_points: int = 120) -> Dict[str, List[Dict]
     return by_key
 
 
+# Kejadian DOWN yang sudah selesai & durasinya di bawah ini dianggap kedipan/noise
+# sesaat (mis. satu siklus polling yang meleset) — tidak dihitung sebagai insiden.
+# Yang masih berlangsung tidak pernah dibuang oleh ambang ini, berapa pun umurnya
+# sejauh ini, karena kita belum tahu itu bakal jadi insiden panjang atau bukan.
+MIN_INCIDENT_SECONDS = 30
+
+# Dua kejadian DOWN berurutan milik entity yang sama, kalau jeda UP di antaranya
+# lebih pendek dari ini, dianggap satu insiden yang sama yang cuma sempat "kedip"
+# nyala sebentar (mis. balas 1 ping pas baru boot) — digabung jadi satu supaya
+# durasi mati sebenarnya (dari kejadian pertama sampai bener-bener pulih) tidak
+# terpotong-potong & log-nya akurat.
+FLAP_MERGE_GAP_SECONDS = 90
+
+
+def _merge_flaps(rows: List[sqlite3.Row]) -> List[Dict]:
+    """Gabung kejadian DOWN berurutan milik entity yang sama kalau jeda UP di
+    antaranya <= FLAP_MERGE_GAP_SECONDS (dianggap kedip sesaat, bukan pulih
+    beneran)."""
+    by_key: Dict[str, List[Dict]] = {}
+    for r in rows:
+        by_key.setdefault(r["entity_key"], []).append(dict(r))
+
+    merged: List[Dict] = []
+    for evs in by_key.values():
+        evs.sort(key=lambda e: e["started_at"])
+        cur = None
+        for e in evs:
+            if cur is None:
+                cur = e
+                continue
+            if cur["ended_at"] is None:
+                # cur masih berlangsung (normalnya cuma satu open event per entity)
+                continue
+            gap = (datetime.datetime.strptime(e["started_at"], _FMT)
+                   - datetime.datetime.strptime(cur["ended_at"], _FMT)).total_seconds()
+            if gap <= FLAP_MERGE_GAP_SECONDS:
+                cur["ended_at"] = e["ended_at"]
+                cur["entity_name"] = e["entity_name"]
+            else:
+                merged.append(cur)
+                cur = e
+        if cur is not None:
+            merged.append(cur)
+    merged.sort(key=lambda e: e["started_at"])
+    return merged
+
+
+def _drop_short_incidents(rows: List[Dict], min_seconds: int = MIN_INCIDENT_SECONDS) -> List[Dict]:
+    """Buang insiden yang sudah SELESAI & durasinya di bawah ambang. Yang masih
+    berlangsung selalu dipertahankan."""
+    out = []
+    for r in rows:
+        if r["ended_at"] is None:
+            out.append(r)
+            continue
+        started = datetime.datetime.strptime(r["started_at"], _FMT)
+        ended = datetime.datetime.strptime(r["ended_at"], _FMT)
+        if (ended - started).total_seconds() >= min_seconds:
+            out.append(r)
+    return out
+
+
+def _clean_incident_rows(rows: List[sqlite3.Row]) -> List[Dict]:
+    """Pipeline standar buat log/statistik: gabung kedipan lalu buang yang masih
+    terlalu pendek. Dipakai di semua fungsi baca supaya Log Insiden & statistik
+    konsisten — sesaat/noise tidak ikut dihitung, insiden nyata tidak terpotong."""
+    return _drop_short_incidents(_merge_flaps(rows))
+
+
 def get_uptime_stats(kind: Optional[str] = None, days: int = 7) -> List[Dict]:
     """Ringkasan keandalan per entity dari noc_events: uptime %, jumlah insiden
     DOWN, total downtime, dan MTTR. Window = `days` hari terakhir."""
@@ -220,6 +435,11 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     win_start = start_dt
     win_end = min(end_dt, now_dt)
     window_seconds = max(0.0, (win_end - win_start).total_seconds())
+    # Catatan: window TIDAK dikurangi durasi blackout. Alasannya, status sebelum &
+    # sesudah blackout tetap dipakai: perangkat yang DOWN sebelum mati DAN masih
+    # DOWN saat pemantauan hidup lagi → event-nya diteruskan (reconcile_after_gap),
+    # jadi blackout ikut dihitung down. Yang UP di kedua sisi dianggap UP selama
+    # blackout. Yang hilang hanyalah kejadian singkat yang murni di dalam blackout.
     lo = win_start.strftime("%Y-%m-%d %H:%M:%S")
     hi = win_end.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -237,6 +457,7 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         rows = conn.execute(q, params).fetchall()
     finally:
         conn.close()
+    rows = _clean_incident_rows(rows)
 
     agg: Dict[str, Dict] = {}
     for r in rows:
@@ -304,6 +525,7 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         rows = conn.execute(q, params).fetchall()
     finally:
         conn.close()
+    rows = _clean_incident_rows(rows)
 
     out = []
     for r in rows:
@@ -326,23 +548,30 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     return out
 
 
-def close_stale_open_events(valid_keys: Optional[set] = None):
+def close_stale_open_events(valid_keys: Optional[set] = None, close_at: Optional[str] = None):
     """Dipanggil sekali saat startup: entity yang event-nya masih 'terbuka' dari
-    sesi sebelumnya (mis. backend baru restart) ditutup di waktu sekarang biar
-    nggak nyangkut selamanya. `valid_keys` opsional buat cuma nutup yang masih
-    dikenal (lainnya dibiarkan, nanti reconcile alami pas polling jalan lagi)."""
+    sesi sebelumnya ditutup biar nggak nyangkut selamanya. `close_at` = waktu
+    penutupan (default sekarang) — saat ada blackout, pemanggil mengisi ini dengan
+    'waktu terakhir terlihat' supaya durasi down tidak digelembungkan oleh jam-jam
+    server mati. `MAX(started_at, close_at)` menjaga ended_at tak mendahului start."""
     init_db()
-    now = _now_iso()
+    now = close_at or _now_iso()
     with _lock:
         conn = _connect()
         try:
             if valid_keys is None:
-                conn.execute("UPDATE noc_events SET ended_at = ? WHERE ended_at IS NULL", (now,))
+                conn.execute(
+                    "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE ended_at IS NULL",
+                    (now,),
+                )
             else:
                 rows = conn.execute("SELECT id, entity_key FROM noc_events WHERE ended_at IS NULL").fetchall()
                 ids = [r["id"] for r in rows if r["entity_key"] not in valid_keys]
                 if ids:
-                    conn.executemany("UPDATE noc_events SET ended_at = ? WHERE id = ?", [(now, i) for i in ids])
+                    conn.executemany(
+                        "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE id = ?",
+                        [(now, i) for i in ids],
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -394,6 +623,7 @@ def get_downtime_log(kind: Optional[str] = None, days: int = 7, limit: int = 300
         params.append(limit)
 
         rows = conn.execute(q, params).fetchall()
+        rows = sorted(_clean_incident_rows(rows), key=lambda r: r["started_at"], reverse=True)
         out = []
         for r in rows:
             started = datetime.datetime.strptime(r["started_at"], "%Y-%m-%d %H:%M:%S")
