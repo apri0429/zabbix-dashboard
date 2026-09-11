@@ -353,7 +353,7 @@ def get_trend(minutes: int = 120, max_points: int = 120) -> Dict[str, List[Dict]
 # sesaat (mis. satu siklus polling yang meleset) — tidak dihitung sebagai insiden.
 # Yang masih berlangsung tidak pernah dibuang oleh ambang ini, berapa pun umurnya
 # sejauh ini, karena kita belum tahu itu bakal jadi insiden panjang atau bukan.
-MIN_INCIDENT_SECONDS = 30
+MIN_INCIDENT_SECONDS = 60
 
 # Dua kejadian DOWN berurutan milik entity yang sama, kalau jeda UP di antaranya
 # lebih pendek dari ini, dianggap satu insiden yang sama yang cuma sempat "kedip"
