@@ -49,6 +49,33 @@ def _duration_to_ms(value):
         return None
 
 
+_LINK_SPEED_UNITS = {"gbps": 1_000_000_000, "mbps": 1_000_000, "kbps": 1_000, "bps": 1}
+
+
+def _link_speed_to_bps(value):
+    """Konversi kecepatan link RouterOS ('1Gbps', '100Mbps') -> bps (int)."""
+    if not value:
+        return None
+    m = re.match(r"([\d.]+)\s*([a-z]+)", str(value).strip().lower())
+    if not m:
+        return None
+    num, unit = m.groups()
+    mult = _LINK_SPEED_UNITS.get(unit)
+    if not mult:
+        return None
+    try:
+        return int(float(num) * mult)
+    except ValueError:
+        return None
+
+
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_mikrotik_configs():
     routers = []
     index = 1
@@ -295,6 +322,96 @@ def get_queue_tree(router_id=None):
                     "borrows": item.get("borrows"),
                     "lends": item.get("lends"),
                     "pcq-queues": item.get("pcq-queues"),
+                })
+        finally:
+            if conn:
+                conn.disconnect()
+
+    return results
+
+
+def get_ether_traffic(router_id=None):
+    """Bandwidth live per port Ethernet fisik (RX/TX), ambil langsung dari port
+    lewat /interface/monitor-traffic (snapshot sekali, once="" biar gak nge-stream
+    kayak default RouterOS). Beda dari get_queue_tree yang bacanya dari Queue Tree
+    (traffic-shaping) — itu cuma kepakai kalau queue-nya memang ada & di-setup;
+    ini langsung dari port-nya, jadi tetap muncul walau queue tree kosong.
+
+    Tiap port dipecah jadi 2 baris (download = RX, upload = TX) dengan suffix
+    "-download"/"-upload" di name-nya, biar format hasilnya sama persis dengan
+    get_queue_tree dan bisa dipakai ulang oleh frontend yang sama (LiveBandwidth).
+    """
+    routers = get_mikrotik_configs()
+    results = []
+
+    if router_id is not None:
+        selected_router = get_router_by_id(router_id)
+        if not selected_router:
+            raise ValueError(f"Router dengan id {router_id} tidak ditemukan")
+        routers = [selected_router]
+
+    for router in routers:
+        conn = None
+        try:
+            conn = connect_mikrotik(router)
+            api = conn.get_api()
+            iface_res = api.get_resource("/interface")
+            ifaces = iface_res.get()
+            # Cuma port yang lagi running (kabel kepasang/link up) yang ditampilkan —
+            # port ether yang gak dipakai (gak running / disabled) cuma bikin
+            # daftar keriuhan tanpa trafik apa-apa.
+            ethers = [
+                it for it in ifaces
+                if (it.get("type") or "").lower() == "ether" and it.get("name")
+                and _parse_bool(it.get("running"), False)
+                and not _parse_bool(it.get("disabled"), False)
+            ]
+            if not ethers:
+                continue
+            names = [it["name"] for it in ethers]
+
+            traffic_by_name = {}
+            try:
+                traffic = iface_res.call("monitor-traffic", {"interface": ",".join(names), "once": ""})
+                traffic_by_name = {t.get("name"): t for t in traffic}
+            except Exception:
+                pass  # rate kosong tetap ditampilkan (mis. "-") daripada gagal semua
+
+            # Kecepatan link fisik (mis. "1Gbps") dipakai sebagai max-limit buat
+            # hitung persen pemakaian di UI. Nggak fatal kalau gagal/tak didukung.
+            speed_by_name = {}
+            try:
+                eth_mon = api.get_resource("/interface/ethernet").call(
+                    "monitor", {"numbers": ",".join(names), "once": ""}
+                )
+                for m in eth_mon:
+                    speed_by_name[m.get("name")] = _link_speed_to_bps(m.get("rate"))
+            except Exception:
+                pass
+
+            for it in ethers:
+                name = it["name"]
+                t = traffic_by_name.get(name) or {}
+                max_bps = speed_by_name.get(name)
+                base = {
+                    "router_id": router["id"],
+                    "router_name": router["name"],
+                    "router_host": router["host"],
+                    "router_port": router["port"],
+                    "router_use_ssl": router.get("use_ssl", False),
+                    "priority": None,
+                    "limit-at": None,
+                    "max-limit": max_bps,
+                    "comment": it.get("comment"),
+                }
+                iface_id = it.get("id") or it.get(".id") or name
+                results.append({
+                    **base, ".id": f"{iface_id}-rx", "name": f"{name}-download",
+                    "rate": t.get("rx-bits-per-second"), "bytes": _to_int(it.get("rx-byte")),
+                })
+                results.append({
+                    **base, ".id": f"{iface_id}-tx", "name": f"{name}-upload",
+                    "rate": t.get("tx-bits-per-second"), "bytes": _to_int(it.get("tx-byte")),
                 })
         finally:
             if conn:

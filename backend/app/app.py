@@ -48,9 +48,9 @@ PNM_HEADER_H   = 210 * 348 / 1820   # full-width A4 -> ~40.1 mm (image is 1820x3
 PNM_FOOTER_H   = 210 * 254 / 1820   # full-width A4 -> ~29.3 mm (image is 1820x254)
 
 try:
-    from .mikrotik import get_dhcp_active, get_queue_tree, get_router_status, get_router_list, get_netwatch, get_client_counts
+    from .mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts
 except ImportError:
-    from mikrotik import get_dhcp_active, get_queue_tree, get_router_status, get_router_list, get_netwatch, get_client_counts
+    from mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts
 
 try:
     from . import noc_history
@@ -267,7 +267,12 @@ def _start_scheduler():
             if live:
                 ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"]}
                         for s in live.get("sites", [])]
-                ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-", "state": d["state"]}
+                # "since" dari MikroTik Netwatch dipakai reconcile_after_gap buat
+                # nentuin persis kapan transisi terjadi selama blackout (router
+                # tetap jalan sendiri walau backend kita mati), bukan asal nebak
+                # "baru saja" pas backend nyala lagi.
+                ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-",
+                          "state": d["state"], "since": d.get("since")}
                          for d in live.get("devices", [])]
                 noc_history.reconcile_after_gap(ents, gap["started_at"])
             else:
@@ -3430,7 +3435,8 @@ def root():
             "/api/debug/hosts",
             "/api/debug/items-by-host",
             "/api/mikrotik/dhcp-active",
-            "/api/mikrotik/queue-tree"
+            "/api/mikrotik/queue-tree",
+            "/api/mikrotik/ether-traffic"
         ]
     }
 
@@ -3460,6 +3466,17 @@ def api_mikrotik_dhcp_active(router_id: int | None = None):
 def api_mikrotik_queue_tree(router_id: int | None = None):
     try:
         data = get_queue_tree(router_id)
+        return {"success": True, "count": len(data), "data": data}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/mikrotik/ether-traffic")
+def api_mikrotik_ether_traffic(router_id: int | None = None):
+    """Live bandwidth per port Ethernet fisik (RX/TX) — lihat get_ether_traffic."""
+    try:
+        data = get_ether_traffic(router_id)
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         traceback.print_exc()

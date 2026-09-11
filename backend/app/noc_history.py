@@ -170,23 +170,40 @@ def record_monitoring_gap(reference: Optional[str] = None) -> Optional[Dict]:
             conn.close()
 
 
+def _safe_parse(ts: Optional[str]) -> Optional[datetime.datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.strptime(ts, _FMT)
+    except (ValueError, TypeError):
+        return None
+
+
 def reconcile_after_gap(entities: List[Dict], gap_start: str):
     """Dipanggil sekali sesudah blackout, dengan status terkini tiap entity.
+    `entities` boleh menyertakan `since` opsional (mis. dari MikroTik Netwatch,
+    yang terus jalan sendiri walau backend kita mati) -- kapan status SEKARANG
+    persis mulai.
 
     - state SAMA dgn sebelum mati → event lama DITERUSKAN (perangkat yang masih
       DOWN dihitung mati sejak semalam; yang masih UP dianggap UP selama blackout).
-    - state BEDA → event lama ditutup di `gap_start` (kita tak tahu persisnya),
-      event baru dibuka sekarang.
+    - state BEDA & ada `since` yang masuk akal (antara mulainya event lama dan
+      sekarang) → dipakai persis sebagai titik transisi, bukan tebakan. Jadi
+      kalau perangkat mati jam 3 sore lalu backend baru nyala lagi jam 3 pagi,
+      insidennya tercatat mulai jam 3 sore itu -- bukan jam 3 pagi.
+    - state BEDA tanpa `since` yang bisa dipakai → event lama ditutup di
+      `gap_start` (kita tak tahu persisnya), event baru dibuka sekarang.
     - entity yang hilang → event lama ditutup di `gap_start`.
     """
     init_db()
     now = _now_iso()
+    now_dt = datetime.datetime.strptime(now, _FMT)
     cur_by_key = {e["key"]: e for e in entities}
     with _lock:
         conn = _connect()
         try:
             open_rows = conn.execute(
-                "SELECT id, entity_key, entity_name, state FROM noc_events WHERE ended_at IS NULL"
+                "SELECT id, entity_key, entity_name, state, started_at FROM noc_events WHERE ended_at IS NULL"
             ).fetchall()
             seen = set()
             for r in open_rows:
@@ -202,19 +219,34 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
                     if r["entity_name"] != cur["name"]:
                         conn.execute("UPDATE noc_events SET entity_name = ? WHERE id = ?", (cur["name"], r["id"]))
                     continue
+
+                # Transisi terjadi entah kapan selama blackout. Kalau ada `since`
+                # yang masuk akal (setelah event lama mulai, sebelum sekarang),
+                # pakai itu -- jauh lebih akurat daripada nebak "baru saja".
+                transition, new_started = gap_start, now
+                since_dt = _safe_parse(cur.get("since"))
+                row_started_dt = _safe_parse(r["started_at"])
+                if since_dt and row_started_dt and row_started_dt <= since_dt <= now_dt:
+                    exact = since_dt.strftime(_FMT)
+                    transition, new_started = exact, exact
+
                 conn.execute(
                     "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE id = ?",
-                    (gap_start, r["id"]),
+                    (transition, r["id"]),
                 )
                 conn.execute(
                     "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) VALUES (?, ?, ?, ?, ?)",
-                    (cur["kind"], cur["key"], cur["name"], cur["state"], now),
+                    (cur["kind"], cur["key"], cur["name"], cur["state"], new_started),
                 )
             for e in entities:
                 if e["key"] not in seen:
+                    started = now
+                    since_dt = _safe_parse(e.get("since"))
+                    if since_dt and since_dt <= now_dt:
+                        started = since_dt.strftime(_FMT)
                     conn.execute(
                         "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) VALUES (?, ?, ?, ?, ?)",
-                        (e["kind"], e["key"], e["name"], e["state"], now),
+                        (e["kind"], e["key"], e["name"], e["state"], started),
                     )
             conn.commit()
         finally:

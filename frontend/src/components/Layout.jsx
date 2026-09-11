@@ -66,7 +66,6 @@ export default function Layout({ children, currentMenu, onMenuChange }) {
           breadcrumb={[{ label: title, active: true }]}
           showMenuButton
           onMenuToggle={() => setMobileOpen((p) => !p)}
-          onRefresh={() => window.location.reload()}
         />
         <main className="dashboard-main">
           {children}

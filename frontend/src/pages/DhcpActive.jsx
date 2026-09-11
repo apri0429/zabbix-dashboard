@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Users01, Wifi, MarkerPin05 } from "@untitledui/icons";
 import { buildApiUrl } from "../api";
 import "../components/templateComponents/templateComponents.css";
 
@@ -17,6 +18,41 @@ const T = {
 
 const Dot = ({ color, size = 6 }) => (
   <span style={{ width: size, height: size, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
+);
+
+/* Warna khas per router (sama pendekatan kayak siteColor di NOC) — tiap router
+   dijatah warna berikutnya dari palet secara berurutan, biar gak ada dua router
+   yang kebagian warna sama. */
+const SITE_PALETTE = ["#2563eb", "#7c3aed", "#0d9488", "#c2410c", "#be185d", "#4f46e5"];
+const _siteColorAssigned = new Map();
+function siteColor(name) {
+  const key = String(name || "");
+  let color = _siteColorAssigned.get(key);
+  if (!color) {
+    color = SITE_PALETTE[_siteColorAssigned.size % SITE_PALETTE.length];
+    _siteColorAssigned.set(key, color);
+  }
+  return color;
+}
+
+const Counter = ({ label, value, color, Icon }) => (
+  <div style={{
+    background: T.surface, border: `1px solid ${T.borderMid}`, borderRadius: 12,
+    padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, minWidth: 0,
+  }}>
+    {Icon && (
+      <span style={{
+        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        width: 34, height: 34, borderRadius: 10, background: `${color}1c`, color,
+      }}>
+        <Icon width={17} height={17} />
+      </span>
+    )}
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", color: T.muted, textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.15, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</div>
+    </div>
+  </div>
 );
 
 export default function DhcpActive() {
@@ -120,6 +156,18 @@ export default function DhcpActive() {
   const rowNum = (index) =>
     rowsPerPage === "all" ? index + 1 : (currentPage - 1) * Number(rowsPerPage) + index + 1;
 
+  // Jumlah user aktif per router (buat counter di header, mirip NOC)
+  const routerCounts = useMemo(() => {
+    const g = {};
+    for (const item of data) {
+      const k = item.router_name || "Lainnya";
+      g[k] = (g[k] || 0) + 1;
+    }
+    return Object.entries(g)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [data]);
+
   return (
     <>
       <style>{`
@@ -139,34 +187,42 @@ export default function DhcpActive() {
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, zIndex: 9999, background: `linear-gradient(90deg,${T.navy},${T.navyMid},${T.teal})`, animation: "dhcp-bar 1.6s ease-in-out infinite", transformOrigin: "left center" }} />
       )}
 
-      <div className="dashboard-content" style={{ height: "100%", overflow: "hidden" }}>
-        <div className="dashboard-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "100%" }}>
-
-          {/* ── Info / router selector bar ── */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "10px 16px" : "10px 28px", background: "rgba(26,42,87,0.03)", borderBottom: `1px solid ${T.border}`, gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, display: "inline-block", animation: "dhcp-pulse 2s ease-in-out infinite", background: refreshing ? "#e9c46a" : "#2a9d8f", boxShadow: refreshing ? "0 0 0 3px rgba(233,196,106,0.22)" : "0 0 0 3px rgba(42,157,143,0.20)" }} />
-              <span style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>
-                {refreshing ? "Memperbarui..." : `Update: ${lastUpdate || "—"}`}
-              </span>
-            </div>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
-                <rect x="1" y="3" width="12" height="8" rx="1.5" stroke={T.muted} strokeWidth="1.3"/>
-                <circle cx="4" cy="7" r="0.9" fill={T.muted}/>
-                <circle cx="7" cy="7" r="0.9" fill={T.muted}/>
-                <circle cx="10" cy="7" r="0.9" fill={T.muted}/>
-              </svg>
-              <select
-                value={routerId}
-                onChange={(e) => setRouterId(e.target.value)}
-                className="dhcp-select"
-                style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 155, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
-              >
-                {routerOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+      <div className="dashboard-content" style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* ── Header — gaya NOC (panel terang, dot status, judul + subjudul) ── */}
+        <div className="dashboard-panel" style={{
+          padding: isMobile ? "12px 16px" : "14px 18px", display: "flex",
+          justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+            <span style={{
+              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+              background: refreshing ? "#e9c46a" : T.teal,
+              boxShadow: `0 0 0 4px ${refreshing ? "rgba(233,196,106,0.18)" : "rgba(42,157,143,0.18)"}`,
+              animation: "dhcp-pulse 2s ease-in-out infinite",
+            }} />
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: T.text }}>User Active</h2>
+              <div style={{ fontSize: 11.5, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                MikroTik DHCP · {refreshing ? "memperbarui…" : `update ${lastUpdate || "—"}`}
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Counter jumlah user, mirip NOC — kartu lepas, selalu sejajar satu baris,
+            scroll ke samping kalau sempit, gak numpuk ke bawah */}
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", flexShrink: 0 }}>
+          <div style={{ flex: "1 1 160px", minWidth: 160 }}>
+            <Counter label="Total User Aktif" value={filteredData.length} color={T.navy} Icon={Users01} />
+          </div>
+          {routerCounts.map((r) => (
+            <div key={r.name} style={{ flex: "1 1 160px", minWidth: 160 }}>
+              <Counter label={r.name} value={r.count} color={siteColor(r.name)} Icon={r.name.toLowerCase().includes("ho") ? MarkerPin05 : Wifi} />
+            </div>
+          ))}
+        </div>
+
+        <div className="dashboard-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
           {/* ── Filter bar ── */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "11px 16px" : "12px 28px", gap: 12, flexWrap: "wrap", background: T.surface, borderBottom: `1px solid ${T.border}` }}>
@@ -191,22 +247,40 @@ export default function DhcpActive() {
                 </button>
               )}
             </div>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
-                <path d="M2 3.5H12M2 7H12M2 10.5H12" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-              <select
-                value={rowsPerPage}
-                onChange={(e) => setRowsPerPage(e.target.value)}
-                className="dhcp-select"
-                style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 115, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
-              >
-                <option value="10">10 rows</option>
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-                <option value="all">Semua</option>
-              </select>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
+                  <rect x="1" y="3" width="12" height="8" rx="1.5" stroke={T.muted} strokeWidth="1.3"/>
+                  <circle cx="4" cy="7" r="0.9" fill={T.muted}/>
+                  <circle cx="7" cy="7" r="0.9" fill={T.muted}/>
+                  <circle cx="10" cy="7" r="0.9" fill={T.muted}/>
+                </svg>
+                <select
+                  value={routerId}
+                  onChange={(e) => setRouterId(e.target.value)}
+                  className="dhcp-select"
+                  style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 155, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
+                >
+                  {routerOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
+                  <path d="M2 3.5H12M2 7H12M2 10.5H12" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <select
+                  value={rowsPerPage}
+                  onChange={(e) => setRowsPerPage(e.target.value)}
+                  className="dhcp-select"
+                  style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 115, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
+                >
+                  <option value="10">10 rows</option>
+                  <option value="25">25 rows</option>
+                  <option value="50">50 rows</option>
+                  <option value="100">100 rows</option>
+                  <option value="all">Semua</option>
+                </select>
+              </div>
             </div>
           </div>
 

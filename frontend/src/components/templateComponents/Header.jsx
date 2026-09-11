@@ -4,7 +4,6 @@ import {
   Bell04,
   ChevronDown,
   Menu01,
-  RefreshCw05,
   SearchMd,
   XClose,
 } from '@untitledui/icons'
@@ -28,7 +27,6 @@ function Header({
   ],
   onMenuToggle,
   notificationProps,
-  onRefresh,
   searchProps,
   showMenuButton = false,
   departmentFilterProps,
@@ -270,20 +268,8 @@ function Header({
 
         <div className="header-right">
           <span className="header-brand-title">NetroWatch</span>
-        </div>
-      </div>
 
-      <div className="header-breadcrumb">
-        <div className="header-breadcrumb-content">
-          <nav
-            className="breadcrumb-nav"
-            aria-label={departmentFilterProps ? 'Filter divisi' : 'Breadcrumb'}
-            ref={breadcrumbFilterRef}
-          >
-            {renderBreadcrumb()}
-          </nav>
-
-          {hasSearch || hasNotification || onRefresh ? (
+          {hasSearch || hasNotification ? (
             <div className="header-toolbar">
               {hasSearch ? (
                 <label
@@ -312,18 +298,6 @@ function Header({
                   onClick={() => setIsNotificationModalOpen(true)}
                 >
                   <Bell04 size={16} />
-                </button>
-              ) : null}
-
-              {onRefresh ? (
-                <button
-                  type="button"
-                  className="header-icon-button header-icon-button--compact"
-                  aria-label="Refresh dashboard"
-                  title="Refresh dashboard"
-                  onClick={onRefresh}
-                >
-                  <RefreshCw05 size={16} />
                 </button>
               ) : null}
             </div>

@@ -19,33 +19,54 @@ const Dot = ({ color, size = 6 }) => (
   <span style={{ width: size, height: size, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
 );
 
-const usageColor = (pct) => {
-  if (pct >= 85) return { text: "#b42318", bg: "rgba(231,111,81,0.12)", border: "rgba(231,111,81,0.28)", bar: "#e76f51" };
-  if (pct >= 60) return { text: "#8a680f", bg: "rgba(233,196,106,0.18)", border: "rgba(233,196,106,0.35)", bar: "#e9c46a" };
-  return         { text: "#18786e", bg: "rgba(42,157,143,0.12)", border: "rgba(42,157,143,0.28)", bar: "#2a9d8f" };
-};
+// Download vs Upload sengaja dibikin dua warna yang beda jauh (teal vs oranye),
+// bukan dua nuansa navy yang mirip — biar kebedain sekilas tanpa baca label.
+const DL_COLOR = "#2a9d8f"; // teal — Download
+const UL_COLOR = "#e76f51"; // oranye/koral — Upload
 
-const LEGEND = [
-  { label: "< 60%",   bg: "rgba(42,157,143,0.12)",  color: "#18786e", border: "rgba(42,157,143,0.28)" },
-  { label: "60–84%",  bg: "rgba(233,196,106,0.18)", color: "#8a680f", border: "rgba(233,196,106,0.35)" },
-  { label: "≥ 85%",   bg: "rgba(231,111,81,0.12)",  color: "#b42318", border: "rgba(231,111,81,0.28)" },
-];
-
-function UsageBar({ pct, col }) {
-  return (
-    <div style={{ minWidth: 96 }}>
-      <span style={{ fontSize: 12, fontWeight: 700, color: col.text, display: "block", marginBottom: 4 }}>
-        {pct.toFixed(1)}%
-      </span>
-      <div style={{ height: 5, borderRadius: 99, background: T.border, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct}%`, background: col.bar, borderRadius: 99, transition: "width 0.4s ease" }} />
-      </div>
-    </div>
-  );
+// Warna khas per router (sama pendekatan kayak siteColor di NOC & User Active) —
+// tiap router dijatah warna berikutnya dari palet secara berurutan, biar gak ada
+// dua router yang kebagian warna sama.
+const SITE_PALETTE = ["#2563eb", "#7c3aed", "#0d9488", "#c2410c", "#be185d", "#4f46e5"];
+const _siteColorAssigned = new Map();
+function siteColor(name) {
+  const key = String(name || "");
+  let color = _siteColorAssigned.get(key);
+  if (!color) {
+    color = SITE_PALETTE[_siteColorAssigned.size % SITE_PALETTE.length];
+    _siteColorAssigned.set(key, color);
+  }
+  return color;
 }
+
+// Grafik tren kecil buat tiap baris (mirip sparkline latency di NOC) — biar
+// kelihatan naik-turunnya trafik, bukan cuma angka & bar % dari max limit.
+const TREND_MAX_POINTS = 30; // ~2.5 menit riwayat (polling tiap 5 detik)
+
+const Sparkline = ({ points = [], color, w = 100, h = 26 }) => {
+  const vals = points.map((p) => (p == null ? null : Number(p))).filter((v) => v != null && !Number.isNaN(v));
+  if (vals.length < 2) return <span style={{ fontSize: 10.5, color: T.muted }}>Mengumpulkan data…</span>;
+  const max = Math.max(...vals, 0.001);
+  const min = Math.min(...vals, 0);
+  const span = max - min || 1;
+  const stepX = w / (points.length - 1);
+  let d = "";
+  points.forEach((p, i) => {
+    if (p == null || Number.isNaN(Number(p))) return;
+    const x = i * stepX;
+    const y = h - ((Number(p) - min) / span) * (h - 4) - 2;
+    d += `${d ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+  });
+  return (
+    <svg width={w} height={h} style={{ display: "block", overflow: "visible" }}>
+      <path d={d} fill="none" stroke={color} strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round" opacity="0.9" />
+    </svg>
+  );
+};
 
 export default function LiveBandwidth() {
   const [data, setData]               = useState([]);
+  const [trendMap, setTrendMap]       = useState({}); // key -> [rate Mbps, ...] riwayat singkat
   const [loading, setLoading]         = useState(true);
   const [refreshing, setRefreshing]   = useState(false);
   const [error, setError]             = useState("");
@@ -74,7 +95,7 @@ export default function LiveBandwidth() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const fetchQueueTree = async (isBackground = false) => {
+  const fetchEtherTraffic = async (isBackground = false) => {
     try {
       if (isBackground) setRefreshing(true);
       else setLoading(true);
@@ -82,8 +103,8 @@ export default function LiveBandwidth() {
 
       const url =
         routerId === "all"
-          ? buildApiUrl("/api/mikrotik/queue-tree")
-          : buildApiUrl(`/api/mikrotik/queue-tree?router_id=${routerId}`);
+          ? buildApiUrl("/api/mikrotik/ether-traffic")
+          : buildApiUrl(`/api/mikrotik/ether-traffic?router_id=${routerId}`);
 
       const res = await fetch(url);
       let rawText = "";
@@ -95,9 +116,21 @@ export default function LiveBandwidth() {
         throw new Error(parsed?.detail || parsed?.message || parsed?.error || rawText || "Gagal mengambil data");
       }
 
-      const rows = parsed?.data || [];
-      setData(Array.isArray(rows) ? rows : []);
+      const rows = Array.isArray(parsed?.data) ? parsed.data : [];
+      setData(rows);
       setLastUpdate(new Date().toLocaleString("id-ID"));
+
+      // Simpan rate terbaru tiap interface ke riwayat singkat (buat sparkline).
+      setTrendMap((prev) => {
+        const next = { ...prev };
+        for (const item of rows) {
+          const key = `${item.router_id}|${item.name}`;
+          const rateMbps = item.rate == null ? null : Number(item.rate) / 1_000_000;
+          const hist = [...(next[key] || []), rateMbps];
+          next[key] = hist.slice(-TREND_MAX_POINTS);
+        }
+        return next;
+      });
     } catch (err) {
       if (!isBackground) setData([]);
       setError(err.message || "Terjadi kesalahan");
@@ -108,8 +141,8 @@ export default function LiveBandwidth() {
   };
 
   useEffect(() => {
-    fetchQueueTree(false);
-    const id = setInterval(() => fetchQueueTree(true), 5000);
+    fetchEtherTraffic(false);
+    const id = setInterval(() => fetchEtherTraffic(true), 5000);
     return () => clearInterval(id);
   }, [routerId]);
 
@@ -129,13 +162,6 @@ export default function LiveBandwidth() {
     return `${n} B`;
   };
 
-  const usagePct = (rate, maxLimit) => {
-    const r = Number(rate) || 0;
-    const m = Number(maxLimit) || 0;
-    if (!m) return 0;
-    return Math.min((r / m) * 100, 100);
-  };
-
   const DL_SUFFIXES = ["-download", "-dl", "-down"];
   const UL_SUFFIXES = ["-upload", "-ul", "-up"];
 
@@ -151,13 +177,18 @@ export default function LiveBandwidth() {
 
   const groupedRows = useMemo(() => {
     const groups = {};
+    const groupRouter = {};
     const standalone = [];
     const groupOrder = [];
 
     data.forEach((item) => {
       const key = getGroupKey(item.name);
       if (key) {
-        if (!groups[key]) { groups[key] = { key, download: null, upload: null }; groupOrder.push(key); }
+        if (!groups[key]) {
+          groups[key] = { key, download: null, upload: null };
+          groupOrder.push(key);
+          groupRouter[key] = { name: item.router_name, id: item.router_id };
+        }
         if (isDownloadQueue(item.name)) groups[key].download = item;
         else groups[key].upload = item;
       } else {
@@ -165,20 +196,34 @@ export default function LiveBandwidth() {
       }
     });
 
+    // Data dari backend sudah berurutan per router (router 1 semua port-nya
+    // dulu, baru router 2, dst) — jadi cukup nyisipin pemisah tiap kali router
+    // ganti, biar keliatan jelas ini "site mana" tanpa perlu ngewarnain kartu.
     const result = [];
+    let lastRouterId;
+    const maybeRouterSep = (router) => {
+      if (router?.id === lastRouterId) return;
+      lastRouterId = router?.id;
+      result.push({ type: "router-sep", name: router?.name || "Router lain" });
+    };
+
     groupOrder.forEach((key) => {
       const g = groups[key];
+      maybeRouterSep(groupRouter[key]);
       result.push({ type: "sep", key });
       if (g.download) result.push({ type: "row", item: g.download, label: "Download", accent: "dl" });
       if (g.upload)   result.push({ type: "row", item: g.upload,   label: "Upload",   accent: "ul" });
     });
-    standalone.forEach((item) => result.push({ type: "row", item, label: null, accent: null }));
+    standalone.forEach((item) => {
+      maybeRouterSep({ name: item.router_name, id: item.router_id });
+      result.push({ type: "row", item, label: null, accent: null });
+    });
 
     return result;
   }, [data]);
 
-  const dlPill = { display: "inline-flex", alignItems: "center", fontSize: 10, fontWeight: 700, background: "rgba(26,42,87,0.10)", color: T.navy, border: `1px solid rgba(26,42,87,0.20)`, padding: "3px 7px", borderRadius: 99, whiteSpace: "nowrap", flexShrink: 0 };
-  const ulPill = { ...dlPill, background: "rgba(26,42,87,0.06)", color: T.navyMid, border: `1px solid rgba(26,42,87,0.14)` };
+  const dlPill = { display: "inline-flex", alignItems: "center", fontSize: 10, fontWeight: 700, background: `${DL_COLOR}1a`, color: DL_COLOR, border: `1px solid ${DL_COLOR}40`, padding: "3px 7px", borderRadius: 99, whiteSpace: "nowrap", flexShrink: 0 };
+  const ulPill = { ...dlPill, background: `${UL_COLOR}1a`, color: UL_COLOR, border: `1px solid ${UL_COLOR}40` };
 
   return (
     <>
@@ -194,46 +239,47 @@ export default function LiveBandwidth() {
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, zIndex: 9999, background: `linear-gradient(90deg,${T.navy},${T.navyMid},${T.teal})`, animation: "lbw-bar 1.6s ease-in-out infinite", transformOrigin: "left center" }} />
       )}
 
-      <div className="dashboard-content" style={{ height: "100%", overflow: "hidden" }}>
-        <div className="dashboard-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "100%" }}>
-
-          {/* ── Info bar ── */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "10px 16px" : "10px 28px", background: "rgba(26,42,87,0.03)", borderBottom: `1px solid ${T.border}`, gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, display: "inline-block", animation: "lbw-pulse 2s ease-in-out infinite", background: refreshing ? "#e9c46a" : "#2a9d8f", boxShadow: refreshing ? "0 0 0 3px rgba(233,196,106,0.22)" : "0 0 0 3px rgba(42,157,143,0.20)" }} />
-              <span style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>
-                {refreshing ? "Memperbarui..." : `Update: ${lastUpdate || "—"}`}
-              </span>
+      <div className="dashboard-content" style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* ── Header — gaya NOC (panel terang, dot status, judul + subjudul) ── */}
+        <div className="dashboard-panel" style={{
+          padding: isMobile ? "12px 16px" : "14px 18px", display: "flex",
+          justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+            <span style={{
+              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+              background: refreshing ? "#e9c46a" : T.teal,
+              boxShadow: `0 0 0 4px ${refreshing ? "rgba(233,196,106,0.18)" : "rgba(42,157,143,0.18)"}`,
+              animation: "lbw-pulse 2s ease-in-out infinite",
+            }} />
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: T.text }}>Live Bandwidth</h2>
+              <div style={{ fontSize: 11.5, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                MikroTik Ethernet · {refreshing ? "memperbarui…" : `update ${lastUpdate || "—"}`}
+              </div>
             </div>
+          </div>
+        </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              {/* Legend */}
-              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11.5, color: T.muted, fontWeight: 600 }}>Indikator:</span>
-                {LEGEND.map((l) => (
-                  <span key={l.label} style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 99, background: l.bg, color: l.color, border: `1px solid ${l.border}` }}>
-                    {l.label}
-                  </span>
-                ))}
-              </div>
+        <div className="dashboard-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
-              {/* Router select */}
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
-                  <rect x="1" y="3" width="12" height="8" rx="1.5" stroke={T.muted} strokeWidth="1.3"/>
-                  <circle cx="4" cy="7" r="0.9" fill={T.muted}/>
-                  <circle cx="7" cy="7" r="0.9" fill={T.muted}/>
-                  <circle cx="10" cy="7" r="0.9" fill={T.muted}/>
-                </svg>
-                <select
-                  value={routerId}
-                  onChange={(e) => setRouterId(e.target.value)}
-                  className="lbw-select"
-                  style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 155, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
-                >
-                  {routerOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-              </div>
+          {/* ── Filter bar ── */}
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: isMobile ? "10px 16px" : "10px 28px", background: "rgba(26,42,87,0.03)", borderBottom: `1px solid ${T.border}`, gap: 12, flexWrap: "wrap" }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
+                <rect x="1" y="3" width="12" height="8" rx="1.5" stroke={T.muted} strokeWidth="1.3"/>
+                <circle cx="4" cy="7" r="0.9" fill={T.muted}/>
+                <circle cx="7" cy="7" r="0.9" fill={T.muted}/>
+                <circle cx="10" cy="7" r="0.9" fill={T.muted}/>
+              </svg>
+              <select
+                value={routerId}
+                onChange={(e) => setRouterId(e.target.value)}
+                className="lbw-select"
+                style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 155, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
+              >
+                {routerOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
             </div>
           </div>
 
@@ -274,6 +320,16 @@ export default function LiveBandwidth() {
               {(() => {
                 let rowNum = 0;
                 return groupedRows.map((row, index) => {
+                  if (row.type === "router-sep") {
+                    const rsc = siteColor(row.name);
+                    return (
+                      <div key={`rsep-${row.name}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 4px", marginTop: index === 0 ? 0 : 6 }}>
+                        <Dot color={rsc} size={7} />
+                        <span style={{ fontSize: 13, fontWeight: 800, color: rsc, letterSpacing: "0.02em" }}>{row.name}</span>
+                        <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${rsc}55 0%, transparent 100%)` }} />
+                      </div>
+                    );
+                  }
                   if (row.type === "sep") {
                     return (
                       <div key={`sep-${row.key}-${index}`} style={{ display: "flex", alignItems: "center", padding: "6px 10px", gap: 8, background: "rgba(26,42,87,0.06)", borderRadius: 8 }}>
@@ -290,8 +346,9 @@ export default function LiveBandwidth() {
                   rowNum += 1;
                   const { item, label, accent } = row;
                   const isDl = accent === "dl";
-                  const pct = usagePct(item.rate, item["max-limit"]);
-                  const col = usageColor(pct);
+                  const accentColor = accent === "dl" ? DL_COLOR : accent === "ul" ? UL_COLOR : T.navy;
+                  const rsc = siteColor(item.router_name);
+                  const trend = trendMap[`${item.router_id}|${item.name}`] || [];
 
                   return (
                     <div key={item[".id"] || `${item.name}-${index}`} className="dashboard-stack__item" style={{ padding: "14px", gap: 0 }}>
@@ -299,41 +356,34 @@ export default function LiveBandwidth() {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1, overflow: "hidden" }}>
                           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 22, height: 22, borderRadius: 6, background: T.navy, color: "#fff", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{rowNum}</span>
-                          <Dot color="#2a9d8f" size={6} />
-                          <span style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.router_name || "—"}</span>
+                          <Dot color={rsc} size={6} />
+                          <span style={{ fontSize: 13, fontWeight: 700, color: rsc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.router_name || "—"}</span>
                         </div>
                         {label ? (
                           <span style={isDl ? dlPill : ulPill}>{label}</span>
                         ) : (
-                          <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", background: "rgba(26,42,87,0.07)", color: T.navy, border: `1px solid ${T.border}`, borderRadius: 99, fontSize: 11, fontWeight: 700 }}>Queue</span>
+                          <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", background: "rgba(26,42,87,0.07)", color: T.navy, border: `1px solid ${T.border}`, borderRadius: 99, fontSize: 11, fontWeight: 700 }}>Interface</span>
                         )}
                       </div>
 
                       {/* Body */}
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 10, marginBottom: 10, borderBottom: `1px solid ${T.border}` }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", minWidth: 44, flexShrink: 0 }}>Queue</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", minWidth: 44, flexShrink: 0 }}>Port</span>
                           <span style={{ display: "inline-block", background: "rgba(26,42,87,0.07)", color: T.navy, padding: "3px 10px", borderRadius: 7, fontSize: 12, fontWeight: 600, border: `1px solid ${T.border}`, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{item.name || "—"}</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", minWidth: 44, flexShrink: 0 }}>Rate</span>
-                          <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, background: col.bg, color: col.text, border: `1px solid ${col.border}` }}>{toMbps(item.rate)}</span>
+                          <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, background: `${accentColor}14`, color: accentColor, border: `1px solid ${accentColor}33` }}>{toMbps(item.rate)}</span>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 11, color: col.text, fontWeight: 700, minWidth: 38 }}>{pct.toFixed(1)}%</span>
-                          <div style={{ flex: 1, height: 5, borderRadius: 99, background: T.border, overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: `${pct}%`, background: col.bar, borderRadius: 99, transition: "width 0.4s ease" }} />
-                          </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                          <Sparkline points={trend} color={accentColor} w={140} h={26} />
                         </div>
                       </div>
 
                       {/* Footer badges */}
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                        {[toMbps(item["limit-at"]), toMbps(item["max-limit"])].map((v, i) => (
-                          <span key={i} style={{ display: "inline-flex", alignItems: "center", background: T.surfaceAlt, color: T.textSoft, padding: "3px 9px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: `1px solid ${T.border}` }}>{v}</span>
-                        ))}
                         <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.text, border: `1px solid ${T.border}`, padding: "3px 9px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace" }}>{toBytes(item.bytes)}</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(26,42,87,0.07)", fontSize: 12, fontWeight: 700, color: T.navy }}>{item.priority || "-"}</span>
                       </div>
                     </div>
                   );
@@ -346,7 +396,7 @@ export default function LiveBandwidth() {
               <table className="users-table" style={{ minWidth: 860 }}>
                 <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "#f0f4fa" }}>
                   <tr>
-                    {["#", "Router", "Queue Name", "Priority", "Limit At", "Max Limit", "Rate", "Usage", "Bytes"].map((h) => (
+                    {["#", "Router", "Interface / Port", "Rate", "Tren (2.5 menit)", "Bytes"].map((h) => (
                       <th key={h}>{h}</th>
                     ))}
                   </tr>
@@ -355,10 +405,24 @@ export default function LiveBandwidth() {
                   {(() => {
                     let rowNum = 0;
                     return groupedRows.map((row, index) => {
+                      if (row.type === "router-sep") {
+                        const rsc = siteColor(row.name);
+                        return (
+                          <tr key={`rsep-${row.name}-${index}`}>
+                            <td colSpan={6} style={{ padding: 0, background: `${rsc}0d`, borderTop: index === 0 ? "none" : `2px solid ${rsc}33` }}>
+                              <div style={{ display: "flex", alignItems: "center", padding: "8px 16px", gap: 8 }}>
+                                <Dot color={rsc} size={8} />
+                                <span style={{ fontSize: 13, fontWeight: 800, color: rsc, letterSpacing: "0.02em" }}>{row.name}</span>
+                                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${rsc}55 0%, transparent 100%)` }} />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
                       if (row.type === "sep") {
                         return (
                           <tr key={`sep-${row.key}-${index}`}>
-                            <td colSpan={9} style={{ padding: 0, background: "rgba(26,42,87,0.04)", borderTop: `1px solid ${T.border}` }}>
+                            <td colSpan={6} style={{ padding: 0, background: "rgba(26,42,87,0.04)", borderTop: `1px solid ${T.border}` }}>
                               <div style={{ display: "flex", alignItems: "center", padding: "7px 16px", gap: 8 }}>
                                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
                                   <rect x="1" y="1" width="10" height="10" rx="2" stroke={T.navy} strokeWidth="1.2"/>
@@ -375,8 +439,9 @@ export default function LiveBandwidth() {
                       rowNum += 1;
                       const { item, label, accent } = row;
                       const isDl = accent === "dl";
-                      const pct = usagePct(item.rate, item["max-limit"]);
-                      const col = usageColor(pct);
+                      const accentColor = accent === "dl" ? DL_COLOR : accent === "ul" ? UL_COLOR : T.navy;
+                      const rsc = siteColor(item.router_name);
+                      const trend = trendMap[`${item.router_id}|${item.name}`] || [];
 
                       return (
                         <tr key={item[".id"] || `${item.name}-${index}`}>
@@ -387,8 +452,8 @@ export default function LiveBandwidth() {
                           </td>
                           <td>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <Dot color="#2a9d8f" size={7} />
-                              <span style={{ fontSize: 13, color: T.text, fontWeight: 600 }}>{item.router_name || "—"}</span>
+                              <Dot color={rsc} size={7} />
+                              <span style={{ fontSize: 13, color: rsc, fontWeight: 700 }}>{item.router_name || "—"}</span>
                             </div>
                           </td>
                           <td>
@@ -397,20 +462,11 @@ export default function LiveBandwidth() {
                               <span style={{ display: "inline-block", background: "rgba(26,42,87,0.07)", color: T.navy, padding: "3px 10px", borderRadius: 7, fontSize: 12, fontWeight: 600, border: `1px solid ${T.border}`, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>{item.name || "—"}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: "center" }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(26,42,87,0.07)", fontSize: 12, fontWeight: 700, color: T.navy }}>{item.priority || "-"}</span>
+                          <td>
+                            <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, background: `${accentColor}14`, color: accentColor, border: `1px solid ${accentColor}33` }}>{toMbps(item.rate)}</span>
                           </td>
                           <td>
-                            <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.textSoft, border: `1px solid ${T.border}`, padding: "3px 10px", borderRadius: 7, fontSize: 12 }}>{toMbps(item["limit-at"])}</span>
-                          </td>
-                          <td>
-                            <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.textSoft, border: `1px solid ${T.border}`, padding: "3px 10px", borderRadius: 7, fontSize: 12 }}>{toMbps(item["max-limit"])}</span>
-                          </td>
-                          <td>
-                            <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, background: col.bg, color: col.text, border: `1px solid ${col.border}` }}>{toMbps(item.rate)}</span>
-                          </td>
-                          <td>
-                            <UsageBar pct={pct} col={col} />
+                            <Sparkline points={trend} color={accentColor} />
                           </td>
                           <td>
                             <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.text, border: `1px solid ${T.border}`, padding: "3px 9px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace" }}>{toBytes(item.bytes)}</span>

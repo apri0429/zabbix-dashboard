@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 import {
   Wifi, Dataflow04, CpuChip01, Server05, Box,
   MarkerPin05, CheckCircle, AlertTriangle, XCircle, AlertCircle, Server04,
-  Clipboard, BarChartSquare02, Expand04, Minimize02, XClose, Users01, Clock,
+  Clipboard, BarChartSquare02, XClose, Users01, Clock, Calendar,
   Download04, Globe05, SearchMd,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
@@ -75,16 +75,25 @@ const severityColor = (sev, pal) =>
 const shortLabel = (s = "") => s.replace(/Mikrotik\s*/i, "").replace(" - ", " / ").trim();
 
 /* Warna khas per site (dipakai di chip filter & kartu ringkasan Perangkat),
-   biar tiap lokasi gampang dibedain sekilas. Hash nama site -> palet tetap. */
+   biar tiap lokasi gampang dibedain sekilas. Dulu pakai hash nama site -> palet,
+   tapi itu bisa nabrak (dua site beda nama kebetulan hash-nya sama, jadi
+   warnanya sama padahal harusnya beda). Sekarang tiap site baru yang ketemu
+   dijatah warna berikutnya dari palet secara berurutan (first-seen), dicache
+   per site — jadi selama jumlah site <= panjang palet, gak ada dua site yang
+   kebagian warna sama. */
 const SITE_PALETTE = [
   "#2563eb", "#7c3aed", "#0d9488", "#c2410c", "#be185d",
   "#4f46e5", "#0891b2", "#a16207", "#65a30d", "#9333ea",
 ];
+const _siteColorAssigned = new Map();
 function siteColor(site) {
-  const s = String(site || "");
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return SITE_PALETTE[h % SITE_PALETTE.length];
+  const key = String(site || "");
+  let color = _siteColorAssigned.get(key);
+  if (!color) {
+    color = SITE_PALETTE[_siteColorAssigned.size % SITE_PALETTE.length];
+    _siteColorAssigned.set(key, color);
+  }
+  return color;
 }
 
 const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
@@ -459,7 +468,8 @@ export default function NocView() {
   const [error, setError] = useState("");
   const [lastOk, setLastOk] = useState(null);
   const rootRef = useRef(null);
-  const [isFs, setIsFs] = useState(false);
+  // Mode "Layar Penuh" (wallboard) dihapus — NOC selalu tampil mode normal.
+  const isFs = false;
   const [loading, setLoading] = useState(false);
   const [clock, setClock] = useState(() => dayjs());
   const [showHistory, setShowHistory] = useState(false);
@@ -484,12 +494,6 @@ export default function NocView() {
   useEffect(() => {
     const t = setInterval(() => setClock(dayjs()), 1000);
     return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    const onFs = () => setIsFs(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
   const load = async () => {
@@ -554,12 +558,6 @@ export default function NocView() {
     return () => clearInterval(t);
   }, []);
 
-  const toggleFullscreen = () => {
-    const el = rootRef.current;
-    if (!document.fullscreenElement) el?.requestFullscreen?.();
-    else document.exitFullscreen?.();
-  };
-
   const counts = data?.counts || { total: 0, up: 0, warn: 0, down: 0, unknown: 0 };
   const sites = data?.sites || [];
   const problems = data?.problems || [];
@@ -587,6 +585,13 @@ export default function NocView() {
     if (text.includes("rbk")) return "RBK";
     return "Lainnya";
   };
+  // Yang masih berlangsung (belum pulih) ditaro paling atas dulu — itu yang paling
+  // butuh perhatian; baru sisanya diurutkan kronologis (terbaru di atas).
+  const byOngoingThenTime = (a, b) => {
+    if (!!a.ongoing !== !!b.ongoing) return a.ongoing ? -1 : 1;
+    return String(b.when).localeCompare(String(a.when));
+  };
+
   // Log kronologis polos: satu baris per kejadian, aktivitas terbaru di atas.
   const incidents = useMemo(() => {
     return (recent || [])
@@ -608,7 +613,7 @@ export default function NocView() {
           ongoing: h.ongoing,
         };
       })
-      .sort((a, b) => String(b.when).localeCompare(String(a.when)));
+      .sort(byOngoingThenTime);
   }, [recent, pal]);
   const incOngoing = incidents.filter((x) => x.ongoing).length;
   const incRecovered = incidents.length - incOngoing;
@@ -631,7 +636,7 @@ export default function NocView() {
   };
   const logRows = useMemo(() => {
     const bos = (recentBlackouts || []).map(fmtBlackout);
-    return [...incidents, ...bos].sort((a, b) => String(b.when).localeCompare(String(a.when)));
+    return [...incidents, ...bos].sort(byOngoingThenTime);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incidents, recentBlackouts]);
 
@@ -805,7 +810,8 @@ export default function NocView() {
             <div style={{ fontSize: isFs ? 32 : 15, fontWeight: 800, color: pal.text, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.02em" }}>
               {clock.format("HH:mm:ss")}
             </div>
-            <div style={{ fontSize: isFs ? 12 : 10.5, color: pal.muted, fontWeight: 600 }}>
+            <div style={{ fontSize: isFs ? 12 : 10.5, color: pal.muted, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+              <Calendar width={isFs ? 13 : 11} height={isFs ? 13 : 11} />
               {fmtTanggal(clock)}
             </div>
           </div>
@@ -815,9 +821,6 @@ export default function NocView() {
                 <BarChartSquare02 width={14} height={14} /> Keandalan
               </button>
             )}
-            <button onClick={toggleFullscreen} style={{ ...btnStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              {isFs ? <><Minimize02 width={14} height={14} /> Keluar</> : <><Expand04 width={14} height={14} /> Layar Penuh</>}
-            </button>
           </div>
         </div>
       </div>
@@ -1181,46 +1184,32 @@ export default function NocView() {
           return `${HARI[dj.day()]}, ${dj.date()} ${BULAN[dj.month()]}`;
         };
         return (
-        <div
-          onClick={() => setShowHistory(false)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 100, background: "rgba(10,14,26,0.55)",
-            backdropFilter: "blur(3px)",
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-          }}
-        >
+        <div className="dashboard-popup-overlay" onClick={() => setShowHistory(false)}>
           <div
             onClick={(e) => e.stopPropagation()}
-            className="dashboard-panel"
-            style={{
-              width: "min(760px, 100%)", maxHeight: "min(680px, 92vh)", display: "flex", flexDirection: "column",
-              padding: 0, background: LIGHT.surface, border: `1px solid ${LIGHT.borderStrong}`, borderRadius: 16,
-              overflow: "hidden",
-            }}
+            className="dashboard-popup"
+            style={{ width: "min(760px, 96vw)", maxHeight: "min(680px, 92vh)", display: "flex", flexDirection: "column" }}
           >
-            {/* Header */}
-            <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${LIGHT.border}`, background: `linear-gradient(180deg, ${LIGHT.CARD_TONE.DOWN.wash}, transparent)` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
-                  <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${LIGHT.coral}1c`, color: LIGHT.coral }}>
-                    <Clipboard width={18} height={18} />
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: LIGHT.text }}>Riwayat Downtime</h3>
-                    <div style={{ fontSize: 11.5, color: LIGHT.muted }}>7 hari terakhir · dari log NOC</div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  {evList.length > 0 && (
-                    <button onClick={exportHistory} style={{ ...excelBtnStyle, display: "inline-flex", alignItems: "center", gap: 6 }} title="Export riwayat ke Excel">
-                      <Download04 width={14} height={14} /> Excel
-                    </button>
-                  )}
-                  <button onClick={() => setShowHistory(false)} style={{ ...btnStyle, display: "inline-flex", alignItems: "center", gap: 6, background: LIGHT.surface, color: LIGHT.navy, border: `1px solid ${LIGHT.borderStrong}` }}><XClose width={14} height={14} /> Tutup</button>
+            {/* Header — template Piagam */}
+            <div className="dashboard-popup__header">
+              <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                  <Clipboard width={18} height={18} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <p className="dashboard-popup__eyebrow">Riwayat Downtime</p>
+                  <h2 className="dashboard-popup__title">7 Hari Terakhir</h2>
                 </div>
               </div>
+              <button type="button" className="dashboard-popup__close" aria-label="Tutup" onClick={() => setShowHistory(false)}>
+                <XClose width={18} height={18} />
+              </button>
+            </div>
+
+            {/* Toolbar: ringkasan + filter — tetap kelihatan, gak ikut scroll */}
+            <div style={{ padding: "16px 20px 0", flexShrink: 0, background: "#fff" }}>
               {(evList.length > 0 || totalBoSec > 0) && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 12 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                   {[
                     [`${total} kejadian`, LIGHT.navy],
                     ongoingN ? [`${ongoingN} masih down`, LIGHT.DOWN] : ["semua pulih", LIGHT.UP],
@@ -1272,8 +1261,14 @@ export default function NocView() {
                       })}
                     </div>
                   ))}
+                  {evList.length > 0 && (
+                    <button onClick={exportHistory} className="dashboard-popup__button dashboard-popup__button--primary" style={{ minWidth: "auto", padding: "6px 12px", fontSize: 11 }} title="Export riwayat ke Excel">
+                      <Download04 width={13} height={13} /> Excel
+                    </button>
+                  )}
                 </div>
               )}
+              <div style={{ height: 1, background: LIGHT.border, marginTop: 14 }} />
             </div>
 
             {/* Body */}
@@ -1301,7 +1296,10 @@ export default function NocView() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {byDay[day]
                         .slice()
-                        .sort((a, b) => String(b.down_at || b.started_at).localeCompare(String(a.down_at || a.started_at)))
+                        .sort((a, b) => {
+                          if (!!a.ongoing !== !!b.ongoing) return a.ongoing ? -1 : 1;
+                          return String(b.down_at || b.started_at).localeCompare(String(a.down_at || a.started_at));
+                        })
                         .map((h, i) => {
                           if (h._blackout) return (
                             <div key={i} className="noc-card" style={{
@@ -1384,39 +1382,32 @@ export default function NocView() {
           ["MTTR", "Mean Time To Recovery — rata-rata lama pemulihan per insiden (Total Down ÷ Insiden). Makin kecil makin cepat ditangani."],
         ];
         return (
-        <div
-          onClick={() => setShowStats(false)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 100, background: "rgba(10,14,26,0.55)",
-            backdropFilter: "blur(3px)",
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-          }}
-        >
+        <div className="dashboard-popup-overlay" onClick={() => setShowStats(false)}>
           <div
             onClick={(e) => e.stopPropagation()}
-            className="dashboard-panel"
-            style={{
-              width: "min(780px, 100%)", maxHeight: "min(680px, 92vh)", display: "flex", flexDirection: "column",
-              padding: 0, background: LIGHT.surface, border: `1px solid ${LIGHT.borderStrong}`, borderRadius: 16,
-              overflow: "hidden",
-            }}
+            className="dashboard-popup"
+            style={{ width: "min(780px, 96vw)", maxHeight: "min(680px, 92vh)", display: "flex", flexDirection: "column" }}
           >
-            {/* Header */}
-            <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${LIGHT.border}`, background: `linear-gradient(180deg, ${V}12, transparent)` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
-                  <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${V}1c`, color: V }}>
-                    <BarChartSquare02 width={18} height={18} />
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: LIGHT.text }}>Keandalan Per Site</h3>
-                    <div style={{ fontSize: 11.5, color: LIGHT.muted }}>7 hari terakhir · dihitung dari log downtime NOC</div>
-                  </div>
+            {/* Header — template Piagam */}
+            <div className="dashboard-popup__header">
+              <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                  <BarChartSquare02 width={18} height={18} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <p className="dashboard-popup__eyebrow">Keandalan Per Site</p>
+                  <h2 className="dashboard-popup__title">Statistik 7 Hari</h2>
                 </div>
-                <button onClick={() => setShowStats(false)} style={{ ...btnStyle, display: "inline-flex", alignItems: "center", gap: 6, background: LIGHT.surface, color: LIGHT.navy, border: `1px solid ${LIGHT.borderStrong}`, flexShrink: 0 }}><XClose width={14} height={14} /> Tutup</button>
               </div>
+              <button type="button" className="dashboard-popup__close" aria-label="Tutup" onClick={() => setShowStats(false)}>
+                <XClose width={18} height={18} />
+              </button>
+            </div>
+
+            {/* Toolbar: ringkasan — tetap kelihatan, gak ikut scroll */}
+            <div style={{ padding: "16px 20px 0", flexShrink: 0, background: "#fff" }}>
               {rows.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 12 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                   {[
                     [`rata-rata uptime ${avgUp == null ? "–" : avgUp.toFixed(2) + "%"}`, upClr(avgUp)],
                     [`${totalInc} insiden total`, LIGHT.navy],
@@ -1426,6 +1417,7 @@ export default function NocView() {
                   ))}
                 </div>
               )}
+              <div style={{ height: 1, background: LIGHT.border, marginTop: 14 }} />
             </div>
 
             {/* Body */}

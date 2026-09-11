@@ -228,23 +228,30 @@ export default function MikrotikStatus() {
         </div>
       )}
 
-      {/* Header panel */}
+      {/* Header panel — gaya NOC (dot status, judul + subjudul) */}
       <div className="dashboard-panel" style={{ padding: isMobile ? 16 : 22 }}>
         <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", flexDirection: isMobile ? "column" : "row", gap: 12 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: T.text, letterSpacing: "-0.025em" }}>
-              Status MikroTik
-            </h2>
-            <p style={{ margin: "3px 0 0", fontSize: 12, color: T.muted }}>
-              CPU, uptime, dan status koneksi per router — refresh otomatis tiap {REFRESH_INTERVAL}s
-            </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+            <span style={{
+              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+              background: loading ? T.gold : offlineCount > 0 ? T.coral : T.teal,
+              boxShadow: `0 0 0 4px ${loading ? "rgba(233,196,106,0.18)" : offlineCount > 0 ? "rgba(231,111,81,0.18)" : "rgba(42,157,143,0.18)"}`,
+              animation: "mt-pulse 2s ease-in-out infinite",
+            }} />
+            <style>{`@keyframes mt-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.2)} }`}</style>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: T.text, letterSpacing: "-0.025em" }}>
+                Status MikroTik
+              </h2>
+              <p style={{ margin: "3px 0 0", fontSize: 12, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                {loading
+                  ? "memperbarui…"
+                  : `update ${lastUpdated ? lastUpdated.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}`}
+                {" "}· refresh otomatis tiap {REFRESH_INTERVAL}s
+              </p>
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {lastUpdated && (
-              <span style={{ fontSize: 11, color: T.muted, fontFamily: "'IBM Plex Mono',monospace" }}>
-                {lastUpdated.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-            )}
             <button
               type="button"
               onClick={fetchStatus}
