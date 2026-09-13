@@ -251,52 +251,29 @@ export default function MikrotikStatus() {
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button
-              type="button"
-              onClick={fetchStatus}
-              disabled={loading}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-                cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit",
-                background: loading ? "rgba(26,42,87,0.05)" : "rgba(26,42,87,0.08)",
-                border: `1px solid ${T.borderMid}`, color: T.navy,
-                opacity: loading ? 0.6 : 1, transition: "background 0.15s",
-              }}
-            >
-              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-                style={{ animation: loading ? "mt-spin 0.8s linear infinite" : "none" }}>
-                <path d="M23 4v6h-6M1 20v-6h6"/>
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-              </svg>
-              <style>{`@keyframes mt-spin { to { transform: rotate(360deg); } }`}</style>
-              {loading ? "Refreshing…" : `Refresh (${countdown}s)`}
-            </button>
-          </div>
-        </div>
 
-        {/* Summary chips */}
-        {data.length > 0 && (
-          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(26,42,87,0.07)", border: `1px solid ${T.borderMid}`, color: T.navy }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.navy, display: "inline-block" }} />
-              {data.length} Router
-            </span>
-            {onlineCount > 0 && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(42,157,143,0.10)", border: "1px solid rgba(42,157,143,0.25)", color: "#18786e" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#18786e", display: "inline-block" }} />
-                {onlineCount} Online
+          {/* Summary chips — pindah ke posisi tombol refresh yang lama */}
+          {data.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(26,42,87,0.07)", border: `1px solid ${T.borderMid}`, color: T.navy }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.navy, display: "inline-block" }} />
+                {data.length} Router
               </span>
-            )}
-            {offlineCount > 0 && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(231,111,81,0.10)", border: "1px solid rgba(231,111,81,0.25)", color: "#b42318" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b42318", display: "inline-block" }} />
-                {offlineCount} Offline
-              </span>
-            )}
-          </div>
-        )}
+              {onlineCount > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(42,157,143,0.10)", border: "1px solid rgba(42,157,143,0.25)", color: "#18786e" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#18786e", display: "inline-block" }} />
+                  {onlineCount} Online
+                </span>
+              )}
+              {offlineCount > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(231,111,81,0.10)", border: "1px solid rgba(231,111,81,0.25)", color: "#b42318" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b42318", display: "inline-block" }} />
+                  {offlineCount} Offline
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Error */}

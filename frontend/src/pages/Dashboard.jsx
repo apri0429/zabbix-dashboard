@@ -13,8 +13,13 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { CheckCircle, AlertTriangle, XCircle, Server04 } from "@untitledui/icons";
 import HistoryTrafficSection from "../components/HistoryTrafficSection";
 import { API_BASE } from "../api";
+
+const HARI = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+const BULAN = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const fmtTanggal = (d) => `${HARI[d.day()]}, ${d.date()} ${BULAN[d.month()]} ${d.year()}`;
 
 /* ─── Template design tokens (from templateComponents.css / color.css) ─── */
 const T = {
@@ -81,6 +86,29 @@ const StatusBadge = ({ status }) => {
     </span>
   );
 };
+
+/* ─── Stat tile (dipakai di header ringkasan, gaya sama kayak NOC Monitor) ─── */
+const StatTile = ({ label, value, color, Icon }) => (
+  <div className="dashboard-panel" style={{
+    background: T.surface, border: `1px solid ${T.border}`,
+    borderRadius: 12, padding: "10px 14px",
+    display: "flex", alignItems: "center", gap: 10,
+  }}>
+    {Icon && (
+      <span style={{
+        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        width: 34, height: 34, borderRadius: 10,
+        background: `${color}1c`, color,
+      }}>
+        <Icon width={17} height={17} />
+      </span>
+    )}
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", color: T.muted, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1.15, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</div>
+    </div>
+  </div>
+);
 
 const ProgressBar = ({ value, color }) => (
   <div style={{ height: 5, borderRadius: 99, background: "rgba(26,42,87,0.08)", overflow: "hidden" }}>
@@ -220,39 +248,41 @@ const DonutChart = ({ rows = [] }) => {
         ))}
       </div>
 
-      <div style={{ position:"relative", height:180 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={data} dataKey="value" cx="50%" cy="50%" innerRadius={52} outerRadius={80} paddingAngle={3} stroke="none" animationDuration={500}>
-              {data.map((d, i) => <Cell key={i} fill={d.color} />)}
-            </Pie>
-            <Tooltip content={<DonutTooltip />} wrapperStyle={{ pointerEvents:"auto", zIndex:40 }} />
-          </PieChart>
-        </ResponsiveContainer>
-        <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", textAlign:"center", pointerEvents:"none" }}>
-          <div style={{ fontSize:18, fontWeight:700, color:tabColor, lineHeight:1, fontFamily:"'IBM Plex Mono',monospace" }}>{total.toFixed(1)}</div>
-          <div style={{ fontSize:9, color:T.muted, marginTop:4, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>
-            {activeTab==="combined"?"Total Avg":activeTab==="download"?"Avg DL":"Avg UL"}
+      <div style={{ display:"flex", gap:20, alignItems:"center" }}>
+        <div style={{ position:"relative", width:190, height:190, flexShrink:0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} dataKey="value" cx="50%" cy="50%" innerRadius={56} outerRadius={90} paddingAngle={3} stroke="none" animationDuration={500}>
+                {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip content={<DonutTooltip />} wrapperStyle={{ pointerEvents:"auto", zIndex:40 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", textAlign:"center", pointerEvents:"none" }}>
+            <div style={{ fontSize:20, fontWeight:700, color:tabColor, lineHeight:1, fontFamily:"'IBM Plex Mono',monospace" }}>{total.toFixed(1)}</div>
+            <div style={{ fontSize:9, color:T.muted, marginTop:4, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+              {activeTab==="combined"?"Total Avg":activeTab==="download"?"Avg DL":"Avg UL"}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div style={{ display:"flex", flexDirection:"column", gap:5, marginTop:10 }}>
-        {data.map((d) => (
-          <div key={d.name} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 10px", borderRadius:8, background:T.surfaceAlt, border:`1px solid ${T.border}`, gap:10 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0 }}>
-              <Dot color={d.color} size={7} />
-              <div style={{ minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.name}</div>
-                <div style={{ fontSize:10.5, color:T.textSoft, marginTop:2, fontWeight:500 }}>↓ {d.avgDownload.toFixed(1)}M · ↑ {d.avgUpload.toFixed(1)}M</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:6, minWidth:0, flex:1 }}>
+          {data.map((d) => (
+            <div key={d.name} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 12px", borderRadius:9, background:T.surfaceAlt, border:`1px solid ${T.border}`, gap:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:9, minWidth:0 }}>
+                <Dot color={d.color} size={7} />
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:12.5, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.name}</div>
+                  <div style={{ fontSize:10.5, color:T.textSoft, marginTop:2, fontWeight:500 }}>↓ {d.avgDownload.toFixed(1)}M · ↑ {d.avgUpload.toFixed(1)}M</div>
+                </div>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0, gap:2 }}>
+                <span style={{ fontSize:13, fontWeight:700, color:tabColor, fontFamily:"'IBM Plex Mono',monospace" }}>{d.value.toFixed(1)}M</span>
+                <span style={{ fontSize:10, color:T.muted, fontWeight:600 }}>{total>0?((d.value/total)*100).toFixed(1):0}%</span>
               </div>
             </div>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0, gap:2 }}>
-              <span style={{ fontSize:12.5, fontWeight:700, color:tabColor, fontFamily:"'IBM Plex Mono',monospace" }}>{d.value.toFixed(1)}M</span>
-              <span style={{ fontSize:10, color:T.muted, fontWeight:600 }}>{total>0?((d.value/total)*100).toFixed(1):0}%</span>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -494,6 +524,7 @@ const DATE_INPUT_STYLE = `
   .dash-dateinput:focus { border-color: #1a2a57 !important; box-shadow: 0 0 0 3px rgba(26,42,87,0.10) !important; background: #fff !important; }
   .dash-dateinput::-webkit-calendar-picker-indicator { opacity:0!important; pointer-events:none!important; position:absolute!important; width:0!important; height:0!important; padding:0!important; margin:0!important; }
   .dash-dateinput::-webkit-inner-spin-button { display:none!important; }
+  @keyframes dash-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
 `;
 
 const DateInput = ({ label, value, onChange, min, max }) => {
@@ -571,6 +602,12 @@ export default function Dashboard() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
   const [report, setReport]       = useState(null);
+  const [clock, setClock]         = useState(() => dayjs());
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(dayjs()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const handleGenerate = async () => {
     if (!startDate || !endDate) { setError("Harap isi tanggal mulai dan akhir."); return; }
@@ -587,6 +624,14 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+
+  // Begitu halaman dibuka, langsung tampilin data H-1 (rentang tanggal default)
+  // tanpa nunggu diklik "Generate Report" dulu — tombol generate tetap ada &
+  // tetap jalan biasa buat rentang tanggal lain.
+  useEffect(() => {
+    handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExportPdf = () =>
     window.open(`${API_BASE}/api/report/export-pdf?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}&_=${Date.now()}`, "_blank");
@@ -606,11 +651,59 @@ export default function Dashboard() {
   const historyChartData = useMemo(() => report?.history_chart || [], [report]);
   const historyMeta      = useMemo(() => report?.history_meta || null, [report]);
 
+  const statusCounts = useMemo(() => {
+    const rows = report?.summary || [];
+    return {
+      total: rows.length,
+      stabil: rows.filter((r) => r.status === "STABIL").length,
+      padat: rows.filter((r) => r.status === "PADAT").length,
+      tinggi: rows.filter((r) => r.status === "TINGGI").length,
+    };
+  }, [report]);
+
   const gap = isMobile ? 12 : 16;
 
   return (
     <div className="dashboard-content" style={{ gap, gridTemplateColumns: "minmax(0, 1fr)", width: "100%" }}>
       <style>{DATE_INPUT_STYLE}</style>
+
+      {/* ── Header (selaras dengan masthead NOC Monitor) ── */}
+      <div className="dashboard-panel" style={{
+        padding: isMobile ? "12px 16px" : "14px 18px", display: "flex",
+        justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+            background: T.teal, boxShadow: `0 0 0 4px ${T.teal}22`,
+            animation: "dash-pulse 2s infinite",
+          }} />
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: isMobile ? 15 : 16, fontWeight: 800, letterSpacing: "0.02em", color: T.text }}>
+              Traffic Report
+            </h2>
+            <div style={{ fontSize: isMobile ? 11 : 11.5, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+              Bandwidth &amp; Utilisasi · {report ? `${report.total_host} host dimuat` : "menunggu data"}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right", lineHeight: 1.05, flexShrink: 0 }}>
+          <div style={{ fontSize: isMobile ? 14 : 15, fontWeight: 800, color: T.text, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.02em" }}>
+            {clock.format("HH:mm:ss")}
+          </div>
+          <div style={{ fontSize: isMobile ? 10 : 10.5, color: T.muted, fontWeight: 600 }}>
+            {fmtTanggal(clock)}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Ringkasan status (gaya sama kayak counter di NOC Monitor) ── */}
+      <div style={{ display: "grid", gap: isMobile ? 8 : 10, gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
+        <StatTile label="Total Host" value={statusCounts.total} color={T.navy} Icon={Server04} />
+        <StatTile label="Stabil" value={statusCounts.stabil} color={STATUS.STABIL.color} Icon={CheckCircle} />
+        <StatTile label="Padat" value={statusCounts.padat} color={STATUS.PADAT.color} Icon={AlertTriangle} />
+        <StatTile label="Tinggi" value={statusCounts.tinggi} color={STATUS.TINGGI.color} Icon={XCircle} />
+      </div>
 
       {/* ── Loading bar ── */}
       {loading && (
@@ -685,7 +778,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Charts ── */}
-      <div style={{ display:"grid", gridTemplateColumns: isMobile||isTablet?"1fr":"1fr 360px", gap, opacity: loading ? 0.55 : 1, transition:"opacity 0.2s" }}>
+      <div style={{ display:"grid", gridTemplateColumns: isMobile||isTablet?"1fr":"1fr 1fr", gap, opacity: loading ? 0.55 : 1, transition:"opacity 0.2s" }}>
         <div className="dashboard-panel" style={{ padding: isMobile?14:22, overflow:"hidden", minWidth:0 }}>
           <SectionTitle subtitle="Rata-rata dan peak bandwidth per interface" compact={isMobile}>Traffic Chart</SectionTitle>
           <TrafficChart rows={report?.summary || []} isMobile={isMobile} />

@@ -9,7 +9,6 @@ import {
 } from '@untitledui/icons'
 
 import logoPiagamSvg from './assets/logo-piagam.png'
-import logoPiagam2Svg from './assets/logo-piagam2.png'
 import './templateComponents.css'
 import {
   ALL_DEPARTMENTS_FILTER_ID,
@@ -246,8 +245,6 @@ function Header({
 
   return (
     <header className="header-main">
-      <img src={logoPiagam2Svg} alt="" aria-hidden="true" className="header-accent-logo" />
-
       <div className="header-content">
         <div className="header-left">
           {showMenuButton ? (
@@ -263,12 +260,12 @@ function Header({
 
           <div className="header-brand">
             <img src={logoPiagamSvg} alt="Logo Piagam" className="header-brand-logo" />
+            <span className="header-brand-divider" aria-hidden="true" />
+            <span className="header-brand-title">NetroWatch</span>
           </div>
         </div>
 
         <div className="header-right">
-          <span className="header-brand-title">NetroWatch</span>
-
           {hasSearch || hasNotification ? (
             <div className="header-toolbar">
               {hasSearch ? (

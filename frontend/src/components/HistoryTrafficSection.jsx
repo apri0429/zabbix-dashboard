@@ -12,6 +12,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import { MarkerPin05 } from "@untitledui/icons";
 
 // ─── Design Tokens ───────────────────────────────────────────────────────────
 const C = {
@@ -42,13 +43,6 @@ const HOST_COLORS = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const shortLabel = (s = "") =>
   s.replace(/Mikrotik\s*/i, "").replace(" - ", " / ").trim();
-
-const makeInitials = (s = "") => {
-  const clean = shortLabel(s);
-  const words = clean.split(/[\s\-\/\.]+/).filter(Boolean);
-  if (words.length === 1) return clean.slice(0, 2).toUpperCase();
-  return words.slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-};
 
 const fmtTime = (v) => {
   if (!v) return "-";
@@ -109,35 +103,17 @@ const TimeAxisTick = ({ x, y, payload }) => {
 };
 
 // ─── Metric Card ─────────────────────────────────────────────────────────────
-const MetricCard = ({ label, value, color, bgColor, borderColor }) => (
-  <div style={{
-    flex: "1 1 calc(50% - 6px)",
-    minWidth: 0,
-    borderRadius: 16,
-    padding: "14px 14px 12px",
-    background: bgColor,
-    border: `1px solid ${borderColor}`,
-  }}>
-    <div style={{
-      display: "flex", alignItems: "center", gap: 6, marginBottom: 10,
-    }}>
-      <Dot color={color} size={7} />
-      <span style={{
-        fontSize: 10, fontWeight: 700, color,
-        textTransform: "uppercase", letterSpacing: "0.07em",
-      }}>
-        {label}
-      </span>
-    </div>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-      <span style={{
-        fontSize: "clamp(18px, 5vw, 26px)", fontWeight: 700, color: C.textPrimary,
-        lineHeight: 1, fontVariantNumeric: "tabular-nums",
-      }}>
-        {Number(value || 0).toFixed(1)}
-      </span>
-      <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>Mbps</span>
-    </div>
+// Strip inline tipis — bukan kartu kotak besar, biar gak makan tempat.
+const MetricCard = ({ label, value, color }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+    <Dot color={color} size={6} />
+    <span style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+      {label}
+    </span>
+    <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
+      {Number(value || 0).toFixed(1)}
+    </span>
+    <span style={{ fontSize: 9.5, color: C.textMuted, fontWeight: 600 }}>Mbps</span>
   </div>
 );
 
@@ -164,94 +140,51 @@ const PillBtn = ({ active, onClick, children, activeColor = C.accent }) => (
 );
 
 // ─── Router Chip ─────────────────────────────────────────────────────────────
-const RouterChip = ({ host, index, isActive, avgDl, onSelect }) => {
+// Gaya horizontal kompak — samain sama "noc-device-summary" di NOC Monitor
+// (ikon kecil + nama + dot status dalam satu baris), biar gak makan tempat.
+const RouterChip = ({ host, index, isActive, avgDl, onSelect, color = C.accent }) => {
   const clean = shortLabel(host);
-  const init = makeInitials(host);
 
   return (
     <button
       onClick={() => onSelect(host)}
       style={{
-        display: "flex", flexDirection: "column", alignItems: "center",
-        width: "100%",
-        minHeight: 130,
-        padding: "16px 12px 14px",
-        borderRadius: 16,
-        border: `1.5px solid ${isActive ? "rgba(35,57,113,0.35)" : "rgba(35,57,113,0.12)"}`,
-        background: isActive
-          ? "linear-gradient(145deg, #233971 0%, #1c2e5a 60%, #0f1e40 100%)"
-          : "linear-gradient(145deg, #f6f8fd 0%, #eef2fb 100%)",
+        display: "flex", alignItems: "center", gap: 8,
+        width: "100%", textAlign: "left",
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: `1px solid ${isActive ? color : "rgba(35,57,113,0.12)"}`,
+        background: isActive ? `${color}12` : "rgba(35,57,113,0.03)",
         cursor: "pointer",
-        transition: "all 0.20s ease",
+        transition: "all 0.16s ease",
         WebkitTapHighlightColor: "transparent",
-        position: "relative",
-        justifyContent: "flex-start",
-        overflow: "hidden",
-        boxShadow: isActive
-          ? "0 4px 16px rgba(35,57,113,0.22)"
-          : "0 1px 3px rgba(35,57,113,0.08)",
+        fontFamily: "inherit",
       }}
     >
-      {/* Background icon watermark (inactive) */}
-      {!isActive && (
-        <svg width="58" height="58" viewBox="0 0 24 24" fill="none"
-          stroke={C.accent} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"
-          style={{ position: "absolute", bottom: -6, right: -6, opacity: 0.055, pointerEvents: "none" }}>
-          <rect x="2" y="9" width="20" height="6" rx="2" />
-          <path d="M6 12h.01M10 12h.01" />
-          <path d="M7 4v5M17 4v5" />
-          <path d="M7 15v5M17 15v5" />
-        </svg>
-      )}
-
-      {/* Avatar */}
-      <div style={{
-        width: 42, height: 42, borderRadius: "50%",
-        background: isActive ? "rgba(255,255,255,0.16)" : "rgba(35,57,113,0.10)",
-        border: isActive ? "1.5px solid rgba(255,255,255,0.28)" : "1.5px solid rgba(35,57,113,0.20)",
+      <span style={{
+        width: 22, height: 22, borderRadius: 7, flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 13, fontWeight: 700,
-        color: isActive ? "#ffffff" : C.accent,
-        marginBottom: 10, marginTop: isActive ? 4 : 7,
-        flexShrink: 0,
+        background: `${color}1c`, color,
       }}>
-        {init}
-      </div>
-
-      {/* Name */}
-      <div style={{
-        fontSize: 10.5, fontWeight: 700,
-        color: isActive ? "rgba(255,255,255,0.90)" : C.accent,
-        textAlign: "center", lineHeight: 1.35,
-        wordBreak: "break-word", maxWidth: "100%",
-        minHeight: 28,
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        {clean}
-      </div>
-
-      {/* Avg DL badge */}
-      {avgDl !== null && (
-        <div style={{
-          marginTop: 8, padding: "3px 8px",
-          borderRadius: 99,
-          background: isActive ? "rgba(255,255,255,0.14)" : "rgba(35,57,113,0.08)",
-          border: isActive ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(35,57,113,0.18)",
-          fontSize: 9.5, fontWeight: 700,
-          color: isActive ? "rgba(255,255,255,0.85)" : C.accent,
-          whiteSpace: "nowrap",
+        <MarkerPin05 width={12} height={12} />
+      </span>
+      <span style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: isActive ? color : "#2a3a5c",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          ↓ {Number(avgDl).toFixed(1)} M
-        </div>
-      )}
-
-      {/* Active green dot */}
+          {clean}
+        </span>
+        {avgDl !== null && (
+          <span style={{ fontSize: 9.5, fontWeight: 600, color: C.textMuted, fontFamily: "'IBM Plex Mono', monospace" }}>
+            ↓ {Number(avgDl).toFixed(1)} M
+          </span>
+        )}
+      </span>
       {isActive && (
-        <div style={{
-          position: "absolute", top: 10, right: 10,
-          width: 7, height: 7, borderRadius: "50%",
-          background: "#00c875",
-          boxShadow: "0 0 0 3px rgba(0,200,117,0.22)",
+        <span style={{
+          width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+          background: color, boxShadow: `0 0 0 3px ${color}2e`,
         }} />
       )}
     </button>
@@ -363,6 +296,14 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   const activeKey = (selectedHost && hostList.includes(selectedHost))
     ? selectedHost : hostList[0];
 
+  // Tiap router dijatah warna berbeda secara berurutan dari HOST_COLORS,
+  // biar gampang dibedain di chip pemilih & sinkron sama warna aktifnya.
+  const hostColorMap = useMemo(() => {
+    const m = {};
+    hostList.forEach((h, i) => { m[h] = HOST_COLORS[i % HOST_COLORS.length]; });
+    return m;
+  }, [hostList]);
+
   const activeRows = useMemo(() => {
     if (!activeKey) return [];
     if (grouped[activeKey]?.length) return grouped[activeKey];
@@ -473,7 +414,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   );
   const yMax          = maxVal <= 10 ? 10 : Math.ceil(maxVal / 10) * 10;
   const peakThreshold = maxVal * 0.88;
-  const activeColor   = C.accent;
+  const activeColor   = hostColorMap[activeKey] || C.accent;
 
   const commonAxis = {
     xAxis: (
@@ -548,12 +489,21 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
             </div>
           </div>
         </div>
-        <div style={{
-          fontSize: 11, fontWeight: 700, padding: "4px 10px",
-          borderRadius: 99, background: C.accent + "12",
-          color: C.accent, border: `1px solid ${C.accent}28`,
-        }}>
-          {chartData.length} titik data
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, padding: "4px 10px",
+            borderRadius: 99, background: C.accent + "12",
+            color: C.accent, border: `1px solid ${C.accent}28`,
+          }}>
+            {chartData.length} titik data
+          </div>
+          {chartData.length > 0 && (
+            <div style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: "nowrap" }}>
+              {fmtDateTime(chartData[0]?.time)}
+              {" → "}
+              {fmtDateTime(chartData[chartData.length - 1]?.time)}
+            </div>
+          )}
         </div>
       </div>
 
@@ -576,9 +526,10 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
             </div>
           </div>
           <div style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: isDesktop ? "wrap" : "nowrap",
+            display: isDesktop ? "grid" : "flex",
+            gridTemplateColumns: isDesktop ? "repeat(auto-fit, minmax(150px, 1fr))" : undefined,
+            gap: 8,
+            flexWrap: isDesktop ? undefined : "nowrap",
             overflowX: isDesktop ? "visible" : "auto",
             WebkitOverflowScrolling: "touch",
             scrollbarWidth: "none",
@@ -598,7 +549,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
                   })();
               return (
                 <div key={host} style={{
-                  flex: isDesktop ? "1 1 128px" : "0 0 112px",
+                  flex: isDesktop ? undefined : "0 0 150px",
                   minWidth: 0,
                 }}>
                   <RouterChip
@@ -607,6 +558,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
                     isActive={host === activeKey}
                     avgDl={avg}
                     onSelect={setSelectedHost}
+                    color={hostColorMap[host]}
                   />
                 </div>
               );
@@ -623,37 +575,16 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
         borderRadius: 99,
       }} />
 
-      {/* ── Active Router Info Bar ─────────────────────────────── */}
+      {/* ── Metric Strip ───────────────────────────────────────── */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 8,
-        padding: "10px 14px",
-        borderRadius: 14, marginBottom: 14,
-        background: "rgba(35,57,113,0.06)",
-        border: "1px solid rgba(35,57,113,0.18)",
-        flexWrap: "wrap",
+        display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+        padding: "8px 12px", borderRadius: 10, marginBottom: 12,
+        background: "rgba(35,57,113,0.03)", border: `1px solid ${C.border}`,
       }}>
-        <div style={{
-          width: 8, height: 8, borderRadius: "50%",
-          background: activeColor, flexShrink: 0,
-        }} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: activeColor }}>
-          {shortLabel(activeKey || "-")}
-        </span>
-        {chartData.length > 0 && (
-          <span style={{ fontSize: 11, color: C.textMuted, marginLeft: "auto" }}>
-            {fmtDateTime(chartData[0]?.time)}
-            {" → "}
-            {fmtDateTime(chartData[chartData.length - 1]?.time)}
-          </span>
-        )}
-      </div>
-
-      {/* ── Metric Cards ───────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
-        <MetricCard label="Peak DL"  value={peakDl} color={C.green}  bgColor={C.greenBg}  borderColor={C.greenBorder}  />
-        <MetricCard label="Peak UL"  value={peakUl} color={C.orange} bgColor={C.orangeBg} borderColor={C.orangeBorder} />
-        <MetricCard label="Avg DL"   value={avgDl}  color={C.green}  bgColor={C.greenBg}  borderColor={C.greenBorder}  />
-        <MetricCard label="Avg UL"   value={avgUl}  color={C.orange} bgColor={C.orangeBg} borderColor={C.orangeBorder} />
+        <MetricCard label="Peak DL" value={peakDl} color={C.green} />
+        <MetricCard label="Peak UL" value={peakUl} color={C.orange} />
+        <MetricCard label="Avg DL"  value={avgDl}  color={C.green} />
+        <MetricCard label="Avg UL"  value={avgUl}  color={C.orange} />
       </div>
 
       {/* ── Toggle Controls ────────────────────────────────────── */}

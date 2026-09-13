@@ -277,8 +277,8 @@ const StatePill = ({ state, size = "sm", pal }) => {
 
 const Metric = ({ label, value, tone, pal }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", color: pal.muted, textTransform: "uppercase" }}>{label}</span>
-    <span style={{ fontSize: 13, fontWeight: 700, color: tone || pal.text, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</span>
+    <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", color: pal.muted, textTransform: "uppercase" }}>{label}</span>
+    <span style={{ fontSize: 11.5, fontWeight: 700, color: tone || pal.text, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</span>
   </div>
 );
 
@@ -313,7 +313,7 @@ const Counter = ({ label, value, color, muted, fs, pal, Icon }) => {
 /* ─── Section header ─── */
 const SectionHead = ({ title, sub, right, fs, pal, stripe }) => (
   <div style={{
-    display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10,
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
     marginBottom: fs ? 16 : 14, paddingBottom: fs ? 10 : 0,
     borderBottom: fs && stripe ? `2px solid ${stripe}55` : undefined,
   }}>
@@ -332,37 +332,49 @@ const SectionHead = ({ title, sub, right, fs, pal, stripe }) => (
 /* ─── Site card ─── */
 const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
   const meta = pal.STATE_META[s.state] || pal.STATE_META.UNKNOWN;
-  const tone = pal.CARD_TONE[s.state] || pal.CARD_TONE.UNKNOWN;
   const StateIcon = STATE_ICON[s.state] || STATE_ICON.UNKNOWN;
+  const sc = siteColor(s.label);
   return (
     <div className={`noc-card${s.state === "DOWN" ? " noc-alarm" : ""}`} style={{
-      background: `linear-gradient(180deg, ${tone.wash}, ${pal.surface} 65%)`,
-      border: `1px solid ${tone.border}`,
-      borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10,
+      background: "transparent",
+      border: `1.5px solid ${sc}66`,
+      borderRadius: 9,
+      alignSelf: "stretch",
+      padding: "8px 9px", display: "flex", flexDirection: "column", gap: 7,
       animationDelay: `${Math.min(idx, 12) * 28}ms`, minHeight: 0, overflow: "hidden",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <span style={{ display: "flex", alignItems: "flex-start", gap: 7, minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           <span style={{
+            width: 19, height: 19, borderRadius: 6, flexShrink: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
-            width: 18, height: 18, borderRadius: "50%", background: `${meta.color}1f`, color: meta.color, flexShrink: 0,
-            boxShadow: pal.dotGlow(meta.color),
-            animation: s.state === "UP" ? "noc-live 2.6s ease-in-out infinite" : undefined,
-          }}><StateIcon width={12} height={12} /></span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: pal.text, overflowWrap: "anywhere" }}>
+            background: `${sc}1c`,
+          }}>
+            <StateIcon width={11} height={11} color={meta.color} />
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: pal.text, overflowWrap: "anywhere" }}>
             {shortLabel(s.label)}
           </span>
         </span>
         <StatePill state={s.state} pal={pal} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-        <Metric label="Latency" value={s.latency_ms == null ? "–" : `${s.latency_ms}ms`} pal={pal} />
-        <Metric label="Loss" value={s.loss_pct == null ? "–" : `${s.loss_pct}%`} tone={(s.loss_pct || 0) >= 2 ? pal.DOWN : undefined} pal={pal} />
-        <Metric label="Utilisasi" value={s.util_pct == null ? "–" : `${s.util_pct}%`} tone={(s.util_pct || 0) >= 85 ? pal.WARN : undefined} pal={pal} />
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0,
+        background: pal.surfaceAlt, border: `1px solid ${pal.border}`, borderRadius: 7, padding: "5px 3px",
+      }}>
+        <div style={{ borderRight: `1px dashed ${pal.border}`, padding: "0 6px" }}>
+          <Metric label="Latency" value={s.latency_ms == null ? "–" : `${s.latency_ms}ms`} pal={pal} />
+        </div>
+        <div style={{ borderRight: `1px dashed ${pal.border}`, padding: "0 6px" }}>
+          <Metric label="Loss" value={s.loss_pct == null ? "–" : `${s.loss_pct}%`} tone={(s.loss_pct || 0) >= 2 ? pal.DOWN : undefined} pal={pal} />
+        </div>
+        <div style={{ padding: "0 6px" }}>
+          <Metric label="Utilisasi" value={s.util_pct == null ? "–" : `${s.util_pct}%`} tone={(s.util_pct || 0) >= 85 ? pal.WARN : undefined} pal={pal} />
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 11, color: pal.muted, borderTop: `1px dashed ${pal.border}`, paddingTop: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 10.5, color: pal.muted }}>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>↓ {s.in_mbps == null ? "–" : `${s.in_mbps}M`}</span>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>↑ {s.out_mbps == null ? "–" : `${s.out_mbps}M`}</span>
         <span title="Tren latency ±2 jam" style={{ marginLeft: "auto", display: "flex", alignItems: "center" }}>
@@ -382,7 +394,7 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
 /* ─── Device card (Netwatch) ─── */
 const deviceKey = (d) => `device:${d.router_name || "-"}:${d.host || d.name || "-"}`;
 
-const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend = [] }) => {
+const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend = [], accent }) => {
   const tp = DEVICE_TYPES[deviceType(d)] || DEVICE_TYPES.device;
   const Icon = tp.icon;
   const c = stateColor(d.state, pal);
@@ -390,35 +402,32 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
   const wallCompact = compact && pal === WALL;
   const showHost = !compact && d.dhcp_name && d.dhcp_name.trim() && d.dhcp_name.trim() !== (d.name || "").trim();
   const showQos = lat != null || (d.loss_pct != null && d.loss_pct > 0);
-
-  const tone = pal.CARD_TONE[d.state] || pal.CARD_TONE.UNKNOWN;
+  const sc = accent || siteColor(d.router_name || "Lainnya");
 
   return (
     <div className={`noc-card${d.state === "DOWN" ? " noc-alarm" : ""}`} style={{
       display: "flex", alignItems: "flex-start", gap: wallCompact ? 10 : compact ? 8 : 10,
-      padding: wallCompact ? "10px 12px" : compact ? "7px 9px" : "10px 12px",
-      background: `linear-gradient(180deg, ${tone.wash}, ${pal.surface} 65%)`,
-      border: `1px solid ${tone.border}`, borderRadius: 10, minWidth: 0, minHeight: 0, overflow: "hidden",
+      padding: wallCompact ? "8px 9px" : compact ? "6px 8px" : "8px 9px",
+      background: "transparent",
+      border: `1.5px solid ${sc}66`,
+      borderRadius: 8,
+      alignSelf: "stretch",
+      minWidth: 0, minHeight: 0, overflow: "hidden",
+      flexShrink: 0,
       animationDelay: `${Math.min(idx, 16) * 22}ms`,
     }}>
       <span style={{
-        position: "relative",
-        width: wallCompact ? 34 : compact ? 26 : 32,
-        height: wallCompact ? 34 : compact ? 26 : 32,
-        borderRadius: 8, flexShrink: 0,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: `${c}1f`, color: c,
+        width: wallCompact ? 30 : compact ? 24 : 28,
+        height: wallCompact ? 30 : compact ? 24 : 28,
+        borderRadius: 7,
+        flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center", color: c,
+        background: `${sc}1c`,
       }}>
-        <Icon width={wallCompact ? 19 : compact ? 15 : 18} height={wallCompact ? 19 : compact ? 15 : 18} />
-        <span style={{
-          position: "absolute", right: -2, bottom: -2, width: 8, height: 8, borderRadius: "50%",
-          background: c, border: `2px solid ${pal.surface}`,
-          animation: d.state === "UP" ? "noc-live 2.6s ease-in-out infinite"
-            : d.state === "DOWN" ? "noc-blink 1s steps(1,end) infinite" : undefined,
-        }} />
+        <Icon width={wallCompact ? 17 : compact ? 14 : 16} height={wallCompact ? 17 : compact ? 14 : 16} />
       </span>
 
-      <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
+      <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
           <span style={{ fontSize: wallCompact ? 13 : compact ? 11.5 : 12.5, fontWeight: 750, color: pal.text, overflowWrap: "anywhere", lineHeight: 1.25 }}>
             {d.name}
@@ -970,7 +979,7 @@ export default function NocView() {
               gridTemplateColumns: isFs ? `repeat(${sitesFit.cols}, 1fr)` : `repeat(auto-fill, minmax(230px, 1fr))`,
               gridAutoRows: isFs && sitesFit.fits ? "1fr" : undefined,
               height: isFs && sitesFit.fits ? "100%" : undefined,
-              gap: isFs ? 10 : 10,
+              gap: isFs ? 10 : 8,
             }}>
               {sites.map((s, i) => (
                 <SiteCard key={s.label} s={s} idx={i} pal={pal}
@@ -1027,16 +1036,25 @@ export default function NocView() {
                 {deviceGroups.map((grp) => { const sc = siteColor(grp.site); return (
                   <button key={grp.site} onClick={() => setDeviceSiteFilter(grp.site)} className="noc-device-summary" style={{
                     textAlign: "left",
-                    border: `1px solid ${deviceSiteFilter === grp.site ? sc : grp.down ? `${pal.DOWN}33` : pal.border}`,
+                    border: `1px solid ${deviceSiteFilter === grp.site ? sc : pal.border}`,
                     borderRadius: 10,
                     padding: isFs ? "9px 12px" : "8px 10px",
-                    background: deviceSiteFilter === grp.site ? `${sc}12` : grp.down ? "rgba(217,45,32,0.035)" : pal.surfaceAlt,
+                    background: deviceSiteFilter === grp.site ? `${sc}12` : pal.surfaceAlt,
                     cursor: "pointer",
                     fontFamily: "inherit",
                     minWidth: isFs ? 170 : 0,
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 900, color: grp.down ? pal.DOWN : sc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortLabel(grp.site)}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span style={{
+                          width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          background: `${sc}1c`, color: sc,
+                        }}>
+                          <MarkerPin05 width={12} height={12} />
+                        </span>
+                        <span style={{ fontSize: 11.5, fontWeight: 900, color: sc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortLabel(grp.site)}</span>
+                      </span>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: grp.down ? pal.DOWN : pal.UP, boxShadow: pal.dotGlow(grp.down ? pal.DOWN : pal.UP), flexShrink: 0 }} />
                     </div>
                     <div style={{ marginTop: 4, fontSize: 10.5, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 800 }}>
@@ -1066,15 +1084,15 @@ export default function NocView() {
                 {filteredDeviceGroups.map((grp) => { const sc = siteColor(grp.site); return (
                   <div key={grp.site} className="noc-device-group" style={{
                     minWidth: 0,
-                    border: `1px solid ${grp.down ? `${pal.DOWN}33` : `${sc}33`}`,
+                    border: `1px solid ${sc}33`,
                     borderRadius: 12,
                     padding: 12,
-                    background: grp.down ? "rgba(217,45,32,0.035)" : "rgba(255,255,255,0.52)",
+                    background: "rgba(255,255,255,0.52)",
                     boxShadow: "0 12px 28px -28px rgba(16,35,63,0.5)",
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                      <span style={{ fontSize: 14, fontWeight: 900, color: grp.down ? pal.DOWN : sc, letterSpacing: "0.03em", textTransform: "uppercase" }}>{shortLabel(grp.site)}</span>
-                      <span style={{ height: 1, flex: 1, background: grp.down ? `${pal.DOWN}33` : `${sc}33` }} />
+                      <span style={{ fontSize: 14, fontWeight: 900, color: sc, letterSpacing: "0.03em", textTransform: "uppercase" }}>{shortLabel(grp.site)}</span>
+                      <span style={{ height: 1, flex: 1, background: `${sc}33` }} />
                       <span style={{ fontSize: 12, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 800, whiteSpace: "nowrap" }}>
                         {grp.up}/{grp.list.length} up{grp.down ? ` · ${grp.down} down` : ""}
                       {clients[grp.site] != null && (
@@ -1083,7 +1101,7 @@ export default function NocView() {
                       </span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 9 }}>
-                      {grp.list.map((d, i) => <DeviceCard key={`${d.host}-${i}`} d={d} idx={i} compact pal={pal} trend={(trend[deviceKey(d)] || []).map((p) => p.latency_ms)} />)}
+                      {grp.list.map((d, i) => <DeviceCard key={`${d.host}-${i}`} d={d} idx={i} compact pal={pal} accent={sc} trend={(trend[deviceKey(d)] || []).map((p) => p.latency_ms)} />)}
                     </div>
                   </div>
                 ); })}
@@ -1093,22 +1111,32 @@ export default function NocView() {
               </div>
             </div>
           ) : (
-            <div className="noc-scroll" style={{ minHeight: 0, flex: 1, overflowY: "auto", margin: "0 -4px", padding: "0 4px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="noc-scroll" style={{ overflowX: "auto", overflowY: "hidden", scrollbarGutter: "auto", margin: "0 -4px", padding: "0 4px", flexShrink: 0 }}>
+              {/* Per site jadi kolom sejajar horizontal & discroll ke samping —
+                  biar jumlah site nambah gak bikin section ini makin panjang ke bawah.
+                  Tinggi kolomnya dipatok tetap (bukan ngikutin sisa ruang panel), biar
+                  gak kegencet/nabrak sama filter & ringkasan di atasnya. */}
+              <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(280px, 1fr)", gridAutoRows: "340px", gap: 14, height: 340 }}>
                 {filteredDeviceGroups.map((grp) => { const sc = siteColor(grp.site); return (
-                  <div key={grp.site}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 800, color: grp.down ? pal.DOWN : sc, letterSpacing: "0.02em" }}>{shortLabel(grp.site)}</span>
-                      <span style={{ height: 1, flex: 1, background: pal.border }} />
-                      <span style={{ fontSize: 10.5, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700 }}>
+                  <div key={grp.site} className="noc-device-group" style={{
+                    minWidth: 0,
+                    display: "flex", flexDirection: "column",
+                    border: `1px solid ${sc}33`,
+                    borderRadius: 12, padding: 11,
+                    background: "rgba(255,255,255,0.55)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, color: sc, letterSpacing: "0.02em" }}>{shortLabel(grp.site)}</span>
+                      <span style={{ height: 1, flex: 1, background: `${sc}33` }} />
+                      <span style={{ fontSize: 10.5, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" }}>
                         {grp.up}/{grp.list.length} up{grp.down ? ` · ${grp.down} down` : ""}
                       {clients[grp.site] != null && (
                         <> · <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Users01 width={10} height={10} /> {clients[grp.site]}</span></>
                       )}
                       </span>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(240px, 1fr))`, gap: 8 }}>
-                      {grp.list.map((d, i) => <DeviceCard key={`${d.host}-${i}`} d={d} idx={i} pal={pal} trend={(trend[deviceKey(d)] || []).map((p) => p.latency_ms)} />)}
+                    <div className="noc-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {grp.list.map((d, i) => <DeviceCard key={`${d.host}-${i}`} d={d} idx={i} pal={pal} accent={sc} trend={(trend[deviceKey(d)] || []).map((p) => p.latency_ms)} />)}
                     </div>
                   </div>
                 ); })}

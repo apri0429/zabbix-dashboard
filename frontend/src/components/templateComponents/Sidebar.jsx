@@ -75,7 +75,7 @@ function SidebarNavItem({
   const content = (
     <>
       {Icon ? (
-        <Icon className="nav-icon" size={22} />
+        <Icon className="nav-icon" size={19} />
       ) : (
         <span className="nav-item__bullet" aria-hidden="true" />
       )}
@@ -254,19 +254,6 @@ function Sidebar({
     <aside id="sidebar" className={sidebarClassName}>
       <button
         type="button"
-        className="sidebar-toggle"
-        aria-label="Toggle Sidebar"
-        onClick={onToggleCollapse}
-      >
-        {collapsed ? (
-          <ChevronRight className="toggle-icon" size={16} />
-        ) : (
-          <ChevronLeft className="toggle-icon" size={16} />
-        )}
-      </button>
-
-      <button
-        type="button"
         className="sidebar-mobile-dismiss"
         aria-label="Close Sidebar"
         onClick={onCloseMobile}
@@ -286,6 +273,25 @@ function Sidebar({
             <p className="profile-role">{userRole}</p>
           </div>
         </div>
+      </div>
+
+      <div className="sidebar-collapse-row">
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          title={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          onClick={onToggleCollapse}
+        >
+          {collapsed ? (
+            <ChevronRight className="toggle-icon" size={16} />
+          ) : (
+            <ChevronLeft className="toggle-icon" size={16} />
+          )}
+          <span className="sidebar-toggle__text">
+            {collapsed ? 'Expand' : 'Collapse'}
+          </span>
+        </button>
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">
@@ -314,13 +320,6 @@ function Sidebar({
             onToggleGroup={handleToggleGroup}
           />
         ))}
-        {!collapsed && (
-          <div className="sidebar-pt-footer" style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-            <p style={{ margin: 0, fontSize: 10.5, color: "rgba(255,255,255,0.45)", fontWeight: 600, lineHeight: 1.5 }}>
-              Pilargroup
-            </p>
-          </div>
-        )}
       </div>
     </aside>
   )

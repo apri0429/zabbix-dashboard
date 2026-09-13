@@ -59,6 +59,12 @@ export default function Layout({ children, currentMenu, onMenuChange }) {
         onToggleCollapse={() => setCollapsed((p) => !p)}
         onCloseMobile={() => setMobileOpen(false)}
       />
+      <button
+        type="button"
+        className={`sidebar-overlay${mobileOpen ? ' active' : ''}`}
+        aria-label="Close sidebar overlay"
+        onClick={() => setMobileOpen(false)}
+      />
 
       <div className="dashboard-stage">
         <Header
