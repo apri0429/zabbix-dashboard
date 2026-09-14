@@ -2571,7 +2571,10 @@ def send_email(
     # ── CTA: buka dashboard NOC realtime untuk detail lebih lanjut ──
     _noc_cta_html = ""
     if NOC_PUBLIC_URL:
-        _noc_link = f"{NOC_PUBLIC_URL}/noc"
+        # NOC_PUBLIC_URL boleh diisi base domain atau sudah termasuk "/noc" —
+        # jangan sampai dobel jadi ".../noc/noc".
+        _noc_base = NOC_PUBLIC_URL[:-4] if NOC_PUBLIC_URL.endswith("/noc") else NOC_PUBLIC_URL
+        _noc_link = f"{_noc_base}/noc"
         _noc_cta_html = (
             "<table width='100%' cellpadding='0' cellspacing='0' style='margin-top:14px;"
             "background:#f1f5f9;border-left:4px solid #1a2a57;border-radius:4px;'><tr>"
