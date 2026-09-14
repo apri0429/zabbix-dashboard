@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import socket
@@ -7,6 +8,25 @@ import routeros_api
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
+
+
+def _parse_ros_since(raw):
+    """RouterOS /tool/netwatch balikin "since" pakai format tanggal RouterOS
+    sendiri (mis. "sep/14/2026 08:03:12"), BUKAN "YYYY-MM-DD HH:MM:SS" yang
+    dipakai di seluruh sistem ini (noc_history reconcile & tampilan NOC).
+    Kalau nggak dikonversi, parsing di noc_history gagal diam-diam -> incident
+    down "reset" ke waktu restart backend alih-alih nyambung dari waktu asli
+    device itu pertama kali down. Coba beberapa format yang mungkin dipakai
+    RouterOS tergantung setting locale/date-nya."""
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%b/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(raw, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_bool(value, default=False):
@@ -499,7 +519,7 @@ def _netwatch_one_router(router, timeout=None):
                 "latency_ms": rtt_avg,
                 "latency_max_ms": rtt_max,
                 "loss_pct": loss_pct,
-                "since": item.get("since"),
+                "since": _parse_ros_since(item.get("since")),
                 "interval": item.get("interval"),
                 "timeout": item.get("timeout"),
             })

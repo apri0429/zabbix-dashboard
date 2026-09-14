@@ -265,12 +265,14 @@ def _start_scheduler():
                 except Exception:
                     time.sleep(5)
             if live:
-                ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"]}
-                        for s in live.get("sites", [])]
-                # "since" dari MikroTik Netwatch dipakai reconcile_after_gap buat
-                # nentuin persis kapan transisi terjadi selama blackout (router
+                # "since" (dari clock problem Zabbix utk site, dari MikroTik
+                # Netwatch utk device) dipakai reconcile_after_gap buat nentuin
+                # persis kapan transisi terjadi selama blackout (Zabbix/router
                 # tetap jalan sendiri walau backend kita mati), bukan asal nebak
                 # "baru saja" pas backend nyala lagi.
+                ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"],
+                         "since": s.get("since")}
+                        for s in live.get("sites", [])]
                 ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-",
                           "state": d["state"], "since": d.get("since")}
                          for d in live.get("devices", [])]
@@ -2773,6 +2775,7 @@ def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
         "util_pct": None,
         "state": "UNKNOWN",
         "last_seen": None,
+        "since": None,
     }
 
     hostid = find_hostid(host_name)
@@ -2852,6 +2855,25 @@ def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
         snap["state"] = "WARN"
     else:
         snap["state"] = "UP"
+
+    if snap["state"] == "DOWN":
+        # Waktu mulai down yang sebenarnya (bukan "last_seen"/waktu polling
+        # terakhir) — dipakai reconcile_after_gap biar incident down tetap
+        # nyambung dari waktu asli walau backend sempat dimatikan/restart.
+        try:
+            probs = zabbix_request("problem.get", {
+                "hostids": [hostid],
+                "output": ["clock"],
+                "sortfield": ["eventid"],
+                "sortorder": "ASC",
+                "limit": 1,
+            })
+            if probs:
+                clock = int(probs[0].get("clock") or 0)
+                if clock:
+                    snap["since"] = datetime.datetime.fromtimestamp(clock).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
 
     return snap
 
