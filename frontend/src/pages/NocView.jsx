@@ -6,7 +6,7 @@ import {
   Wifi, Dataflow04, CpuChip01, Server05, Box,
   MarkerPin05, CheckCircle, AlertTriangle, XCircle, AlertCircle, Server04,
   Clipboard, BarChartSquare02, XClose, Users01, Clock, Calendar,
-  Download04, Globe05, SearchMd,
+  Download04, Globe05, SearchMd, Send01,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
 
@@ -495,6 +495,10 @@ export default function NocView() {
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState(null);
   const [statsErr, setStatsErr] = useState("");
+  const [showReport, setShowReport] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportErr, setReportErr] = useState("");
+  const [reportResult, setReportResult] = useState(null);
   const [deviceStatusFilter, setDeviceStatusFilter] = useState("ALL");
   const [deviceSiteFilter, setDeviceSiteFilter] = useState("ALL");
 
@@ -540,6 +544,43 @@ export default function NocView() {
       setStatsErr(err?.response?.data?.detail || err?.message || "Gagal memuat statistik");
     }
   };
+
+  const openReport = () => {
+    setShowReport(true);
+    setReportErr("");
+    setReportResult(null);
+  };
+
+  const previewReport = async () => {
+    setReportBusy(true);
+    setReportErr("");
+    try {
+      const { data } = await axios.post(`${API_BASE}/api/noc/report/weekly`, null, { params: { send: false }, timeout: 60000 });
+      setReportResult(data);
+    } catch (err) {
+      setReportErr(err?.response?.data?.detail || err?.message || "Gagal membuat laporan");
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  const sendReportNow = async () => {
+    setReportBusy(true);
+    setReportErr("");
+    try {
+      const { data } = await axios.post(`${API_BASE}/api/noc/report/weekly`, null, { params: { send: true }, timeout: 60000 });
+      setReportResult(data);
+    } catch (err) {
+      setReportErr(err?.response?.data?.detail || err?.message || "Gagal mengirim laporan");
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showReport && !reportResult && !reportBusy) previewReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReport]);
 
   const loadHistory = async () => {
     setHistory(null);
@@ -828,6 +869,11 @@ export default function NocView() {
             {!isFs && (
               <button onClick={() => setShowStats(true)} style={{ ...keandalanBtnStyle, display: "inline-flex", alignItems: "center", gap: 6 }} title="Uptime % & MTTR 7 hari">
                 <BarChartSquare02 width={14} height={14} /> Keandalan
+              </button>
+            )}
+            {!isFs && (
+              <button onClick={openReport} style={{ ...tintBtnStyle(pal.teal), display: "inline-flex", alignItems: "center", gap: 6 }} title="Buat & kirim rekap NOC mingguan sekarang">
+                <Send01 width={14} height={14} /> Laporan Mingguan
               </button>
             )}
           </div>
@@ -1510,6 +1556,76 @@ export default function NocView() {
                     </>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {showReport && (() => {
+        const T = pal.teal;
+        const pdfUrl = `${API_BASE}/api/noc/report/weekly/pdf`;
+        return (
+        <div className="dashboard-popup-overlay" onClick={() => !reportBusy && setShowReport(false)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="dashboard-popup"
+            style={{ width: "min(520px, 96vw)", display: "flex", flexDirection: "column" }}
+          >
+            <div className="dashboard-popup__header">
+              <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                  <Send01 width={18} height={18} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <p className="dashboard-popup__eyebrow">Rekap NOC</p>
+                  <h2 className="dashboard-popup__title">Laporan Mingguan</h2>
+                </div>
+              </div>
+              <button type="button" className="dashboard-popup__close" aria-label="Tutup" disabled={reportBusy} onClick={() => setShowReport(false)}>
+                <XClose width={18} height={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "18px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {reportErr ? (
+                <div style={{ color: LIGHT.DOWN, fontSize: 13, padding: "20px 0", textAlign: "center" }}>{reportErr}</div>
+              ) : !reportResult ? (
+                <div style={{ color: LIGHT.muted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Menyiapkan laporan…</div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12.5, color: LIGHT.textSoft, lineHeight: 1.5 }}>
+                    Periode <b style={{ color: LIGHT.text }}>{reportResult.period}</b> — file{" "}
+                    <b style={{ color: LIGHT.text }}>{reportResult.pdf_name}</b>
+                    {reportResult.has_ai ? " (sudah termasuk ringkasan AI)." : " (ringkasan AI tidak tersedia untuk periode ini)."}
+                  </div>
+                  {reportResult.sent && (
+                    <div style={{ fontSize: 12, fontWeight: 700, color: LIGHT.UP, background: LIGHT.STATE_META.UP.bg, borderRadius: 8, padding: "8px 11px", display: "flex", alignItems: "center", gap: 6 }}>
+                      <CheckCircle width={15} height={15} /> Terkirim ke WhatsApp
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <a
+                  href={reportResult ? pdfUrl : undefined}
+                  target="_blank" rel="noreferrer"
+                  style={{ ...tintBtnStyle(RIWAYAT_BLUE), textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6, opacity: reportResult ? 1 : 0.5, pointerEvents: reportResult ? "auto" : "none" }}
+                >
+                  <Download04 width={14} height={14} /> Lihat / Unduh PDF
+                </a>
+                <button
+                  onClick={sendReportNow}
+                  disabled={reportBusy || !reportResult}
+                  style={{ ...tintBtnStyle(T), display: "inline-flex", alignItems: "center", gap: 6, opacity: reportBusy || !reportResult ? 0.6 : 1, cursor: reportBusy || !reportResult ? "default" : "pointer" }}
+                >
+                  <Send01 width={14} height={14} /> {reportBusy ? "Mengirim…" : "Kirim ke WhatsApp"}
+                </button>
+              </div>
+              <div style={{ fontSize: 10.5, color: LIGHT.muted, lineHeight: 1.4 }}>
+                Rekap minggu kalender penuh terakhir (Senin–Minggu). Mengirim manual di sini tidak mengganggu jadwal otomatis Senin 10:00 WIB.
               </div>
             </div>
           </div>

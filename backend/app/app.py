@@ -3352,7 +3352,7 @@ def _auto_send_weekly_noc_report():
 
 _scheduler.add_job(
     _auto_send_weekly_noc_report,
-    CronTrigger(day_of_week="mon", hour=6, minute=0, timezone="Asia/Jakarta"),
+    CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="Asia/Jakarta"),
     id="noc_weekly_report",
     replace_existing=True,
 )
