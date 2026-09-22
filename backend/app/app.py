@@ -3292,13 +3292,63 @@ def _wa_send_file(path: str, caption: str = ""):
         logging.exception("Rekap NOC: kirim file (cloud) gagal")
 
 
-def _send_noc_report(result: Dict):
-    """Kirim teks ringkasan + PDF ke WhatsApp."""
+def _send_noc_report_email(result: Dict, title: str):
+    """Kirim PDF rekap NOC (mingguan/bulanan) ke TO_EMAIL."""
+    if not TO_EMAIL:
+        logging.warning("Rekap NOC: TO_EMAIL kosong — email tidak dikirim")
+        return
+    if not (SMTP_USER and SMTP_PASS):
+        logging.warning("Rekap NOC: SMTP belum dikonfigurasi — email tidak dikirim")
+        return
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_USER
+    msg["To"] = ", ".join(TO_EMAIL)
+    msg["Subject"] = f"{title} - PT Pilar Niaga Makmur ({result['period_label']})"
+
+    narrative_html = ""
+    if result.get("narrative"):
+        narrative_html = (
+            "<p style='margin:0 0 12px;font-size:13px;color:#1e293b;line-height:1.5;'>"
+            f"{result['narrative'].replace(chr(10), '<br>')}</p>"
+        )
+    html = (
+        "<html><body style='font-family:Arial,sans-serif;'>"
+        f"<h3 style='margin:0 0 4px;color:#0f2044;'>{title}</h3>"
+        f"<p style='margin:0 0 16px;font-size:12px;color:#64748b;'>{result['period_label']}</p>"
+        f"{narrative_html}"
+        "<p style='margin:0;font-size:11px;color:#94a3b8;'>Rincian lengkap ada di lampiran PDF. "
+        "Email ini dibuat secara otomatis oleh sistem monitoring jaringan PT Pilar Niaga Makmur.</p>"
+        "</body></html>"
+    )
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with open(result["pdf_path"], "rb") as f:
+            attach = MIMEApplication(f.read(), _subtype="pdf")
+            attach.add_header("Content-Disposition", "attachment", filename=result["pdf_name"])
+            msg.attach(attach)
+    except FileNotFoundError:
+        logging.warning("Rekap NOC: PDF tidak ditemukan, email dikirim tanpa lampiran")
+
+    try:
+        s = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        s.starttls()
+        s.login(SMTP_USER, SMTP_PASS)
+        s.send_message(msg)
+        s.quit()
+        logging.info("Rekap NOC: email terkirim ke %s", TO_EMAIL)
+    except Exception:
+        logging.exception("Rekap NOC: kirim email gagal")
+
+
+def _send_noc_report(result: Dict, title: str = "Rekap NOC"):
+    """Kirim teks ringkasan + PDF ke WhatsApp, dan PDF ke email."""
     try:
         _send_whatsapp_message(result["wa_text"])
     except Exception:
         logging.exception("Rekap NOC: kirim teks WA gagal")
     _wa_send_file(result["pdf_path"], caption=result["period_label"])
+    _send_noc_report_email(result, title)
 
 
 def _generate_periodic_report(start_dt: datetime.datetime, end_dt: datetime.datetime,
@@ -3344,7 +3394,7 @@ def _auto_send_weekly_noc_report():
         return
     try:
         r = generate_weekly_report()
-        _send_noc_report(r)
+        _send_noc_report(r, "Rekap NOC Mingguan")
         logging.info("Rekap NOC mingguan terkirim (AI: %s) -> %s", r["has_ai"], r["pdf_name"])
     except Exception:
         logging.exception("Rekap NOC mingguan: gagal")
@@ -3352,7 +3402,7 @@ def _auto_send_weekly_noc_report():
 
 _scheduler.add_job(
     _auto_send_weekly_noc_report,
-    CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="Asia/Jakarta"),
+    CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Asia/Jakarta"),
     id="noc_weekly_report",
     replace_existing=True,
 )
@@ -3377,7 +3427,7 @@ def api_noc_report_weekly(send: bool = Query(False, description="true = kirim ke
     try:
         r = generate_weekly_report()
         if send:
-            _send_noc_report(r)
+            _send_noc_report(r, "Rekap NOC Mingguan")
         return _report_response(r, send)
     except Exception as e:
         traceback.print_exc()
@@ -3404,7 +3454,7 @@ def api_noc_report_monthly(
     try:
         r = generate_monthly_report(year, month)
         if send:
-            _send_noc_report(r)
+            _send_noc_report(r, "Rekap NOC Bulanan")
         return _report_response(r, send)
     except Exception as e:
         traceback.print_exc()
