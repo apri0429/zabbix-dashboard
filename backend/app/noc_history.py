@@ -253,9 +253,16 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
             conn.close()
 
 
+def _cutoff_iso(days: int) -> str:
+    """Batas awal window `days` hari ke belakang; days <= 0 = seluruh riwayat."""
+    if days <= 0:
+        return "0000-00-00 00:00:00"
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).strftime(_FMT)
+
+
 def get_blackouts(days: int = 7) -> List[Dict]:
     init_db()
-    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime(_FMT)
+    cutoff = _cutoff_iso(days)
     conn = _connect()
     try:
         rows = conn.execute(
@@ -609,7 +616,7 @@ def close_stale_open_events(valid_keys: Optional[set] = None, close_at: Optional
             conn.close()
 
 
-def cleanup_old_events(retention_days: int = 30) -> int:
+def cleanup_old_events(retention_days: int = 365) -> int:
     """Hapus event lama yang sudah selesai. Event yang masih berlangsung tidak
     dihapus, walaupun umurnya lebih dari retention_days."""
     init_db()
@@ -635,17 +642,19 @@ def cleanup_old_events(retention_days: int = 30) -> int:
         return deleted
 
 
-def get_downtime_log(kind: Optional[str] = None, days: int = 7, limit: int = 300) -> List[Dict]:
-    """Riwayat kejadian DOWN: kapan mulai, kapan pulih (atau masih berlangsung), durasinya."""
+def get_downtime_log(kind: Optional[str] = None, days: int = 7, limit: int = 20000) -> List[Dict]:
+    """Riwayat kejadian DOWN: kapan mulai, kapan pulih (atau masih berlangsung), durasinya.
+    days <= 0 = seluruh riwayat yang tersimpan. Kejadian yang mulai sebelum window
+    tapi masih menyentuhnya ikut diambil."""
     init_db()
-    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = _cutoff_iso(days)
     now_dt = datetime.datetime.now()
 
     conn = _connect()
     try:
         q = (
             "SELECT kind, entity_key, entity_name, state, started_at, ended_at "
-            "FROM noc_events WHERE state = 'DOWN' AND started_at >= ?"
+            "FROM noc_events WHERE state = 'DOWN' AND (ended_at IS NULL OR ended_at >= ?)"
         )
         params = [cutoff]
         if kind:

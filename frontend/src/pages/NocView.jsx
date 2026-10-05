@@ -586,7 +586,7 @@ export default function NocView() {
     setHistory(null);
     setHistoryErr("");
     try {
-      const { data } = await axios.get(`${API_BASE}/api/noc/history`, { params: { days: 7 }, timeout: 20000 });
+      const { data } = await axios.get(`${API_BASE}/api/noc/history`, { params: { days: 0 }, timeout: 30000 });
       setHistory(data.events || []);
       setHistBlackouts(data.blackouts || []);
     } catch (err) {
@@ -904,7 +904,7 @@ export default function NocView() {
             right={(
               <div style={{ display: "flex", gap: 6 }}>
                 {!isFs && (
-                  <button onClick={() => setShowHistory(true)} style={{ ...riwayatBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Lihat detail riwayat insiden 7 hari terakhir">
+                  <button onClick={() => setShowHistory(true)} style={{ ...riwayatBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Lihat seluruh riwayat insiden yang tercatat">
                     <Clipboard width={13} height={13} /> Detail Riwayat
                   </button>
                 )}
@@ -1272,7 +1272,7 @@ export default function NocView() {
                 </span>
                 <div style={{ minWidth: 0 }}>
                   <p className="dashboard-popup__eyebrow">Riwayat Downtime</p>
-                  <h2 className="dashboard-popup__title">7 Hari Terakhir</h2>
+                  <h2 className="dashboard-popup__title">Semua Riwayat</h2>
                 </div>
               </div>
               <button type="button" className="dashboard-popup__close" aria-label="Tutup" onClick={() => setShowHistory(false)}>
@@ -1357,7 +1357,7 @@ export default function NocView() {
                     {filtered ? <SearchMd width={24} height={24} /> : <CheckCircle width={26} height={26} />}
                   </span>
                   <span style={{ fontSize: 14, fontWeight: 700, color: LIGHT.text }}>{filtered ? "Tidak ada yang cocok" : "Tidak ada downtime"}</span>
-                  <span style={{ fontSize: 11.5, color: LIGHT.muted }}>{filtered ? "Coba ubah kata kunci atau filternya." : "Belum ada site / perangkat down dalam 7 hari terakhir."}</span>
+                  <span style={{ fontSize: 11.5, color: LIGHT.muted }}>{filtered ? "Coba ubah kata kunci atau filternya." : "Belum ada site / perangkat down yang tercatat."}</span>
                 </div>
               ) : (
                 days.map((day) => (
@@ -1417,7 +1417,7 @@ export default function NocView() {
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: LIGHT.DOWN }}><XCircle width={10} height={10} />{hhmm(h.down_at)}</span>
                                   <span style={{ color: LIGHT.mutedAccent }}>→</span>
                                   {h.up_at
-                                    ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: LIGHT.UP }}><CheckCircle width={10} height={10} />{hhmm(h.up_at)}</span>
+                                    ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: LIGHT.UP }}><CheckCircle width={10} height={10} />{hhmm(h.up_at)}{String(h.up_at).slice(0, 10) !== String(h.down_at).slice(0, 10) ? ` (${String(h.up_at).slice(8, 10)}/${String(h.up_at).slice(5, 7)})` : ""}</span>
                                     : <span style={{ color: LIGHT.DOWN, fontWeight: 800 }}>masih down</span>}
                                 </div>
                               </div>

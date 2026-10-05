@@ -3034,7 +3034,7 @@ def api_noc_live():
 
 
 NOC_HISTORY_POLL_SECONDS = 30
-NOC_HISTORY_RETENTION_DAYS = 30
+NOC_HISTORY_RETENTION_DAYS = 365
 
 
 def _device_key(d: Dict) -> str:
@@ -3184,8 +3184,9 @@ _scheduler.add_job(
 
 
 @app.get("/api/noc/history")
-def api_noc_history(kind: Optional[str] = Query(None, pattern="^(site|device)$"), days: int = Query(7, ge=1, le=90)):
-    """Log riwayat downtime: kapan mati, kapan pulih, berapa lama. Lihat
+def api_noc_history(kind: Optional[str] = Query(None, pattern="^(site|device)$"), days: int = Query(0, ge=0, le=3650)):
+    """Log riwayat downtime: kapan mati, kapan pulih, berapa lama. days=0 = semua
+    riwayat yang tersimpan. Lihat
     noc_history.py untuk keterbatasan resolusi & cakupan datanya."""
     try:
         return {
