@@ -1613,7 +1613,8 @@ class PDF(FPDF):
 
 
 def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.datetime,
-             output_path: str = REPORT_PATH, ai_summary: Optional[str] = None):
+             output_path: str = REPORT_PATH, ai_summary: Optional[str] = None,
+             isp_incidents: Optional[List[Dict]] = None):
     pdf = PDF()
     # Leave room for the PNM letterhead (top) and decorative footer (bottom)
     pdf.set_top_margin(PNM_HEADER_H + 9)
@@ -1698,6 +1699,47 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
             except Exception:
                 pass
         pdf.ln(2)
+
+    # ── Log ISP mati (laporan periodik; None = laporan harian, bagian ini dilewati) ──
+    if isp_incidents is not None:
+        _lat = noc_report._lat1
+        pdf.section_title("Log ISP Mati")
+        pdf.set_font("Helvetica", "I", 7.4)
+        pdf.set_text_color(*_C_MUTED)
+        pdf.multi_cell(0, 4.2,
+            "Daftar seluruh kejadian koneksi ISP putus pada periode ini (perangkat tidak "
+            "dihitung). Kedipan di bawah 1 menit tidak dicatat sebagai kejadian.", align="L")
+        pdf.ln(2)
+        if not isp_incidents:
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*_C_NAVY)
+            pdf.cell(0, 7, "Tidak ada ISP mati pada periode ini.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        else:
+            _tot = sum(i["duration_seconds"] for i in isp_incidents)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(*_C_NAVY)
+            pdf.cell(0, 6, f"{len(isp_incidents)} kejadian  |  total mati {noc_report._fmt_dur(_tot)}",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            _CW = [20, 56, 38, 38, 20, 18]   # sum = 190
+            pdf.table_header(_CW, ["Tanggal", "ISP / Lokasi", "Mati", "Pulih", "Durasi", "Status"], 7)
+            pdf.set_font("Helvetica", "", 7.5)
+            for idx, inc in enumerate(sorted(isp_incidents, key=lambda x: x["down_at"])):
+                pdf.set_fill_color(*(_C_GOLD_LT if idx % 2 == 0 else _C_WHITE))
+                pdf.set_text_color(*_C_BODY)
+                d_at = datetime.datetime.strptime(inc["down_at"], "%Y-%m-%d %H:%M:%S")
+                u_at = (datetime.datetime.strptime(inc["up_at"], "%Y-%m-%d %H:%M:%S")
+                        if inc["up_at"] else None)
+                fill = idx % 2 == 0
+                pdf.cell(_CW[0], 7, d_at.strftime("%d-%m-%Y"), border=1, align="C", fill=fill)
+                pdf.cell(_CW[1], 7, _lat(inc["name"])[:34], border=1, align="L", fill=fill)
+                pdf.cell(_CW[2], 7, d_at.strftime("%d-%m-%Y %H:%M:%S"), border=1, align="C", fill=fill)
+                pdf.cell(_CW[3], 7, u_at.strftime("%d-%m-%Y %H:%M:%S") if u_at else "-",
+                         border=1, align="C", fill=fill)
+                pdf.cell(_CW[4], 7, noc_report._fmt_dur(inc["duration_seconds"]), border=1, align="R", fill=fill)
+                pdf.set_text_color(*((200, 30, 30) if inc["ongoing"] else _C_BODY))
+                pdf.cell(_CW[5], 7, "MASIH MATI" if inc["ongoing"] else "Pulih", border=1, align="C",
+                         fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(4)
 
     # ── Metodologi penilaian ──
     pdf.section_title("Cara Menilai: Stabil / Padat / Tinggi")
@@ -3364,7 +3406,8 @@ def _generate_periodic_report(start_dt: datetime.datetime, end_dt: datetime.date
         logging.exception("Rekap NOC: gagal buat chart")
     narrative = noc_report.generate_narrative(data)
     pdf_path = os.path.join(BASE_OUTPUT_DIR, pdf_name)
-    make_pdf(summary, start_dt, end_dt, pdf_path, ai_summary=narrative)
+    make_pdf(summary, start_dt, end_dt, pdf_path, ai_summary=narrative,
+             isp_incidents=data.get("isp_incidents", []))
     return {
         "pdf_path": pdf_path, "pdf_name": pdf_name,
         "period_label": data["period_label"],

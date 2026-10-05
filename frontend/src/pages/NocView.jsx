@@ -487,6 +487,9 @@ export default function NocView() {
   const [histQuery, setHistQuery] = useState("");
   const [histKind, setHistKind] = useState("ALL");
   const [histStatus, setHistStatus] = useState("ALL");
+  const [histRange, setHistRange] = useState("ALL"); // ALL | TODAY | 7 | 30 | CUSTOM
+  const [histFrom, setHistFrom] = useState("");
+  const [histTo, setHistTo] = useState("");
   const [recent, setRecent] = useState([]);
   const [recentBlackouts, setRecentBlackouts] = useState([]);
   const [histBlackouts, setHistBlackouts] = useState([]);
@@ -595,7 +598,7 @@ export default function NocView() {
   };
 
   useEffect(() => {
-    if (showHistory) { loadHistory(); setHistQuery(""); setHistKind("ALL"); setHistStatus("ALL"); }
+    if (showHistory) { loadHistory(); setHistQuery(""); setHistKind("ALL"); setHistStatus("ALL"); setHistRange("ALL"); setHistFrom(""); setHistTo(""); }
   }, [showHistory]);
 
   useEffect(() => {
@@ -705,8 +708,41 @@ export default function NocView() {
     exportRowsToExcel(rows, "Log Insiden", `Log_Insiden_NOC_${dayjs().format("YYYYMMDD_HHmm")}.xlsx`);
   };
 
+  // Rentang tanggal riwayat [from, to] (YYYY-MM-DD, inklusif); "" = tanpa batas.
+  const histBounds = useMemo(() => {
+    const fmt = (d) => d.format("YYYY-MM-DD");
+    const today = dayjs();
+    if (histRange === "TODAY") return [fmt(today), fmt(today)];
+    if (histRange === "7") return [fmt(today.subtract(6, "day")), fmt(today)];
+    if (histRange === "30") return [fmt(today.subtract(29, "day")), fmt(today)];
+    if (histRange === "CUSTOM") return [histFrom, histTo];
+    return ["", ""];
+  }, [histRange, histFrom, histTo]);
+  // Kejadian ikut tampil kalau rentang down→pulih (atau sampai sekarang) menyentuh rentang tanggal.
+  const inHistRange = (startStr, endStr) => {
+    const [from, to] = histBounds;
+    const s = String(startStr || "").slice(0, 10);
+    const e = String(endStr || "").slice(0, 10) || dayjs().format("YYYY-MM-DD");
+    if (from && e < from) return false;
+    if (to && s > to) return false;
+    return true;
+  };
+  const histEvList = useMemo(() => {
+    const q = histQuery.trim().toLowerCase();
+    return (history || []).filter((h) => {
+      if (histKind === "SITE" && h.kind !== "site") return false;
+      if (histKind === "DEVICE" && h.kind === "site") return false;
+      if (histStatus === "ONGOING" && !h.ongoing) return false;
+      if (histStatus === "DONE" && h.ongoing) return false;
+      if (q && !`${h.name || ""} ${h.router_name || ""}`.toLowerCase().includes(q)) return false;
+      return inHistRange(h.down_at, h.up_at);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, histQuery, histKind, histStatus, histBounds]);
+
   const exportHistory = () => {
-    const rows = (history || []).map((h) => ({
+    const rows = histEvList.map((h) => ({
+      Tanggal: String(h.down_at || "").slice(0, 10),
       Jenis: h.kind === "site" ? "Site" : "Perangkat",
       Nama: shortLabel(h.name),
       "Mati Jam": h.down_at,
@@ -1223,15 +1259,8 @@ export default function NocView() {
       {showHistory && (() => {
         const rawList = history || [];
         const q = histQuery.trim().toLowerCase();
-        const evList = rawList.filter((h) => {
-          if (histKind === "SITE" && h.kind !== "site") return false;
-          if (histKind === "DEVICE" && h.kind === "site") return false;
-          if (histStatus === "ONGOING" && !h.ongoing) return false;
-          if (histStatus === "DONE" && h.ongoing) return false;
-          if (q && !`${h.name || ""} ${h.router_name || ""}`.toLowerCase().includes(q)) return false;
-          return true;
-        });
-        const filtered = rawList.length !== evList.length || !!q;
+        const evList = histEvList;
+        const filtered = rawList.length !== evList.length || !!q || histRange !== "ALL";
         const total = evList.length;
         const ongoingN = evList.filter((h) => h.ongoing).length;
         const siteN = evList.filter((h) => h.kind === "site").length;
@@ -1242,14 +1271,15 @@ export default function NocView() {
           (byDay[day] = byDay[day] || []).push(h);
         }
         const showBo = histKind === "ALL" && histStatus === "ALL" && !q;
+        const boList = (histBlackouts || []).filter((b) => inHistRange(b.started_at, b.ended_at));
         if (showBo) {
-          for (const b of histBlackouts || []) {
+          for (const b of boList) {
             const day = String(b.started_at || "").slice(0, 10) || "–";
             (byDay[day] = byDay[day] || []).push({ _blackout: true, ...b });
           }
         }
         const days = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
-        const totalBoSec = (histBlackouts || []).reduce((s, b) => s + (b.seconds || 0), 0);
+        const totalBoSec = boList.reduce((s, b) => s + (b.seconds || 0), 0);
         const dayLabel = (d) => {
           const dj = dayjs(d);
           if (!dj.isValid()) return d;
@@ -1272,7 +1302,10 @@ export default function NocView() {
                 </span>
                 <div style={{ minWidth: 0 }}>
                   <p className="dashboard-popup__eyebrow">Riwayat Downtime</p>
-                  <h2 className="dashboard-popup__title">Semua Riwayat</h2>
+                  <h2 className="dashboard-popup__title">
+                    {histRange === "ALL" ? "Semua Riwayat" : histRange === "TODAY" ? "Riwayat Hari Ini" : histRange === "7" ? "Riwayat 7 Hari" : histRange === "30" ? "Riwayat 30 Hari"
+                      : `Riwayat ${histFrom ? dayjs(histFrom).format("D MMM YYYY") : "awal"} – ${histTo ? dayjs(histTo).format("D MMM YYYY") : "sekarang"}`}
+                  </h2>
                 </div>
               </div>
               <button type="button" className="dashboard-popup__close" aria-label="Tutup" onClick={() => setShowHistory(false)}>
@@ -1296,7 +1329,33 @@ export default function NocView() {
                 </div>
               )}
               {rawList.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, alignItems: "center" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, alignItems: "center" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: LIGHT.textSoft, textTransform: "uppercase", letterSpacing: "0.06em", marginRight: 2 }}>Tanggal</span>
+                  {[["ALL", "Semua"], ["TODAY", "Hari ini"], ["7", "7 hari"], ["30", "30 hari"], ["CUSTOM", "Pilih tanggal"]].map(([k, label]) => {
+                    const active = histRange === k;
+                    return (
+                      <button key={k} onClick={() => setHistRange(k)} style={{
+                        border: `1px solid ${active ? LIGHT.navy : LIGHT.borderStrong}`,
+                        background: active ? `${LIGHT.navy}14` : LIGHT.surfaceAlt,
+                        color: active ? LIGHT.navy : LIGHT.textSoft,
+                        borderRadius: 7, padding: "5px 8px", fontSize: 10.5, fontWeight: 800,
+                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                      }}>{label}</button>
+                    );
+                  })}
+                  {histRange === "CUSTOM" && [["Dari", histFrom, setHistFrom], ["Sampai", histTo, setHistTo]].map(([lbl, val, setter]) => (
+                    <label key={lbl} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: LIGHT.textSoft }}>
+                      {lbl}
+                      <input type="date" value={val} onChange={(e) => setter(e.target.value)}
+                        min={lbl === "Sampai" ? histFrom || undefined : undefined}
+                        max={lbl === "Dari" ? histTo || undefined : undefined}
+                        style={{ padding: "4px 6px", borderRadius: 7, border: `1px solid ${LIGHT.borderStrong}`, background: LIGHT.surfaceAlt, fontSize: 11, color: LIGHT.text, fontFamily: "inherit" }} />
+                    </label>
+                  ))}
+                </div>
+              )}
+              {rawList.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, alignItems: "center" }}>
                   <div style={{ position: "relative", flex: "1 1 190px", minWidth: 150 }}>
                     <SearchMd width={13} height={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: LIGHT.muted }} />
                     <input
@@ -1357,7 +1416,7 @@ export default function NocView() {
                     {filtered ? <SearchMd width={24} height={24} /> : <CheckCircle width={26} height={26} />}
                   </span>
                   <span style={{ fontSize: 14, fontWeight: 700, color: LIGHT.text }}>{filtered ? "Tidak ada yang cocok" : "Tidak ada downtime"}</span>
-                  <span style={{ fontSize: 11.5, color: LIGHT.muted }}>{filtered ? "Coba ubah kata kunci atau filternya." : "Belum ada site / perangkat down yang tercatat."}</span>
+                  <span style={{ fontSize: 11.5, color: LIGHT.muted }}>{filtered ? "Coba ubah kata kunci, tanggal, atau filternya." : "Belum ada site / perangkat down yang tercatat."}</span>
                 </div>
               ) : (
                 days.map((day) => (
@@ -1365,7 +1424,10 @@ export default function NocView() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, position: "sticky", top: 0, background: LIGHT.surface, zIndex: 1, paddingTop: 6 }}>
                       <span style={{ fontSize: 10.5, fontWeight: 800, color: LIGHT.textSoft, textTransform: "uppercase", letterSpacing: "0.06em" }}>{dayLabel(day)}</span>
                       <span style={{ height: 1, flex: 1, background: LIGHT.border }} />
-                      <span style={{ fontSize: 10, color: LIGHT.muted, fontFamily: "'IBM Plex Mono', monospace" }}>{byDay[day].length}×</span>
+                      <span style={{ fontSize: 10, color: LIGHT.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {byDay[day].filter((x) => !x._blackout).length} kejadian
+                        {(() => { const t = byDay[day].reduce((a, x) => a + (x._blackout ? 0 : (x.duration_seconds || 0)), 0); return t ? ` · total ${fmtAge(t)}` : ""; })()}
+                      </span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {byDay[day]

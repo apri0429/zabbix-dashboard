@@ -222,6 +222,13 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     total_downtime = sum(i["duration_seconds"] for i in incidents)
     site_incidents = [i for i in incidents if i["kind"] == "site"]
     device_incidents = [i for i in incidents if i["kind"] == "device"]
+    # Log ISP mati (kind "site" = koneksi/link ISP per lokasi): lengkap dgn jam & durasi.
+    # Perangkat (Netwatch) sengaja tidak ikut — cuma ISP.
+    isp_incidents = [
+        {"name": _short(i["name"]), "down_at": i["down_at"], "up_at": i["up_at"],
+         "duration_seconds": i["duration_seconds"], "ongoing": i["ongoing"]}
+        for i in site_incidents
+    ]
 
     up_vals = [s["uptime_pct"] for s in sites if s.get("uptime_pct") is not None]
     avg_uptime = round(sum(up_vals) / len(up_vals), 3) if up_vals else None
@@ -245,6 +252,7 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
         "total_device_incidents": len(device_incidents),
         "total_downtime_seconds": total_downtime,
         "total_downtime_human": _fmt_dur(total_downtime),
+        "isp_incidents": isp_incidents,
         "sites": sites,
         "flapping_devices": flapping,
         "worst_site": worst,
@@ -358,6 +366,17 @@ def _narrative_prompt(data: Dict) -> str:
             lines.append(f"- {b['label']}: {b['avg_mbps']}/{b['peak_mbps']} Mbps, "
                          f"utilisasi {b['util_pct']}%, beban {b['status']}, {lat}{cap}{fl}")
 
+    isp = data.get("isp_incidents") or []
+    if isp:
+        lines.append(f"\nKejadian ISP mati ({len(isp)}x; jam mati -> jam pulih, durasi):")
+        for i in isp[:40]:
+            up = i["up_at"] or "masih mati"
+            lines.append(f"- {i['name']}: {i['down_at']} -> {up}, {_fmt_dur(i['duration_seconds'])}")
+        lines.append("(Sebutkan kejadian ISP mati di bagian Keandalan & Gangguan lengkap dengan "
+                     "nama ISP/lokasi, jam, dan durasinya.)")
+    else:
+        lines.append("\nTidak ada kejadian ISP mati pada periode ini.")
+
     lines.append("\nUptime per site:")
     for s in data["sites"]:
         d = "" if s["delta_pct"] is None else f", perubahan {s['delta_pct']:+.2f} poin"
@@ -461,6 +480,16 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str) -> str:
     worst = data.get("worst_site")
     if worst:
         head += f"\nSite terparah: {_short(worst['name'])} ({worst['uptime_pct']}%, {worst['incidents']} insiden)"
+    isp = data.get("isp_incidents") or []
+    if isp:
+        head += f"\n\nISP MATI ({len(isp)}x):"
+        for i in isp[:10]:
+            up = i["up_at"][5:16] if i["up_at"] else "masih mati"
+            head += f"\n- {i['name']}: {i['down_at'][5:16]} -> {up} ({_fmt_dur(i['duration_seconds'])})"
+        if len(isp) > 10:
+            head += f"\n- ... +{len(isp) - 10} lagi (lihat PDF)"
+    else:
+        head += "\n\nISP MATI: tidak ada."
     if narrative:
         body = narrative.strip()
         if len(body) > 2600:
