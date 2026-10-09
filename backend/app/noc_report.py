@@ -147,10 +147,16 @@ def _bandwidth_summary(start: datetime.datetime, end: datetime.datetime) -> List
         return []
 
     out = []
-    for r in rows:
+    for idx, r in enumerate(rows):
         peak = max(r.get("peak_download") or 0.0, r.get("peak_upload") or 0.0)
         util = max(r.get("max_peakraw_pct") or 0.0, r.get("max_avg_pct") or 0.0)
         out.append({
+            "idx": idx,
+            "avg_down": round(r.get("avg_download") or 0.0, 2),
+            "avg_up": round(r.get("avg_upload") or 0.0, 2),
+            "peak_down": round(r.get("peak_download") or 0.0, 2),
+            "peak_up": round(r.get("peak_upload") or 0.0, 2),
+            "score": round(r.get("weighted_score") or 0.0, 1),
             "label": _short(r.get("label", "")),
             "capacity": r.get("capacity") or 0,
             "avg_mbps": round(r.get("avg") or 0.0, 1),
@@ -536,27 +542,28 @@ def _busy_hours_label() -> str:
 
 
 def _wa_bandwidth_block(data: Dict) -> str:
+    """Angka sama persis dengan tabel 'Ringkasan Trafik Jaringan' di PDF
+    (Avg/Peak Download & Upload terpisah, Score, Status), urutan sama."""
     rows = [b for b in (data.get("bandwidth") or []) if b.get("capacity")]
     if not rows:
         return ""
+    rows.sort(key=lambda b: b.get("idx", 0))
     lines = [f"📶 *Pemakaian Bandwidth - Jam Kerja {_busy_hours_label()}*",
              "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
-             "Rata-rata = pemakaian sehari-hari, Puncak = lonjakan tertinggi sesaat. "
-             "Status sama dengan PDF: dinilai dari pemakaian yang berlangsung lama, "
-             "jadi lonjakan sesaat belum tentu berarti jalur penuh terus._"]
-    for b in rows[:8]:
-        cap = b["capacity"]
-        u = b["util_pct"]
+             "Angka sama dengan tabel di PDF. Rata-rata = pemakaian sehari-hari, "
+             "Puncak = lonjakan tertinggi sesaat. Status dinilai dari pemakaian yang "
+             "berlangsung lama (Skor), jadi lonjakan sesaat belum tentu berarti jalur "
+             "penuh terus._"]
+    for b in rows:
         st = (b.get("status") or "").upper()
         icon = {"TINGGI": "🔴", "PADAT": "🟠", "STABIL": "🟢"}.get(st, "⚪")
-        ket = st or "-"
         tag = " (cadangan)" if b.get("is_standby") else ""
-        avg_pct = round(100.0 * b["avg_mbps"] / cap) if cap else 0
         lines.append(
-            f"\n{icon} *{b['label']}*{tag} - {ket}\n"
-            f"   Kapasitas : {cap:g} Mbps\n"
-            f"   Rata-rata : {b['avg_mbps']:g} Mbps ({avg_pct}%)\n"
-            f"   Puncak    : {b['peak_mbps']:g} Mbps ({round(u)}%)")
+            f"\n{icon} *{b['label']}*{tag} - {st or '-'}\n"
+            f"   Kapasitas : {b['capacity']:g} Mbps\n"
+            f"   Rata-rata : ⬇ {b['avg_down']:g} | ⬆ {b['avg_up']:g} Mbps\n"
+            f"   Puncak    : ⬇ {b['peak_down']:g} | ⬆ {b['peak_up']:g} Mbps\n"
+            f"   Skor      : {b['score']:g}%")
     return "\n".join(lines)
 
 
