@@ -345,8 +345,10 @@ _SYSTEM_PROMPT = (
     "periode lalu kalau ada.\n\n"
     "Bandwidth\n"
     "2-3 bullet (awali '- '). Jelaskan bandwidth = kapasitas jalur internet "
-    "(seperti lebar jalan). Sebut lokasi yang puncak pemakaiannya penuh (>=90%) "
-    "dan artinya (internet terasa lambat saat jam sibuk, untuk berapa pengguna). "
+    "(seperti lebar jalan). Pakai STATUS beban dari data (STABIL/PADAT/TINGGI) sebagai "
+    "patokan - sama dengan PDF - jangan menilai sendiri dari angka puncak. Sebut lokasi "
+    "berstatus TINGGI/PADAT dan artinya (internet bisa lambat saat jam sibuk, untuk "
+    "berapa pengguna). Puncak sesaat tinggi tapi status STABIL = hanya lonjakan singkat. "
     "Sebut juga lokasi yang masih lega. Kalau puncak lebih dari 100%, jelaskan "
     "itu lonjakan sesaat melebihi kapasitas.\n\n"
     "Perlu Tindakan\n"
@@ -534,13 +536,15 @@ def _wa_bandwidth_block(data: Dict) -> str:
         return ""
     lines = ["📶 *Pemakaian Bandwidth*",
              "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
-             "Rata-rata = pemakaian sehari-hari, Puncak = saat paling ramai. "
-             "Puncak 90% ke atas = jalur penuh, internet terasa lambat._"]
+             "Rata-rata = pemakaian sehari-hari, Puncak = lonjakan tertinggi sesaat. "
+             "Status sama dengan PDF: dinilai dari pemakaian yang berlangsung lama, "
+             "jadi lonjakan sesaat belum tentu berarti jalur penuh terus._"]
     for b in rows[:8]:
         cap = b["capacity"]
         u = b["util_pct"]
-        icon = "🔴" if u >= 90 else ("🟠" if u >= 70 else "🟢")
-        ket = "PENUH" if u >= 90 else ("PADAT" if u >= 70 else "LEGA")
+        st = (b.get("status") or "").upper()
+        icon = {"TINGGI": "🔴", "PADAT": "🟠", "STABIL": "🟢"}.get(st, "⚪")
+        ket = st or "-"
         tag = " (cadangan)" if b.get("is_standby") else ""
         avg_pct = round(100.0 * b["avg_mbps"] / cap) if cap else 0
         lines.append(
