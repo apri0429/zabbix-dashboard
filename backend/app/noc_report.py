@@ -17,6 +17,7 @@ Keduanya balikin dict: {pdf_path, pdf_name, wa_text, narrative, has_ai, data}.
 """
 
 import os
+import re
 import calendar
 import logging
 import datetime
@@ -183,6 +184,38 @@ def _client_snapshot() -> Tuple[Dict[str, Optional[int]], Optional[int]]:
 
 # ─────────────────────────── agregasi data ───────────────────────────
 
+def _isp_link_stats(start: datetime.datetime, end: datetime.datetime) -> List[Dict]:
+    """Uptime tiap link ISP (perangkat Netwatch yang namanya mengandung 'ISP').
+    Link yang tidak pernah mati tetap ikut (uptime 100%)."""
+    names: Dict[str, str] = {}
+    try:
+        conn = noc_history._connect()
+        try:
+            for r in conn.execute("SELECT DISTINCT entity_key, entity_name FROM noc_events "
+                                  "WHERE kind='device'").fetchall():
+                if "isp" in (r["entity_name"] or "").lower():
+                    names[r["entity_key"]] = r["entity_name"]
+        finally:
+            conn.close()
+    except Exception:
+        logging.exception("NOC report: gagal baca daftar link ISP")
+    stats = {d["key"]: d for d in noc_history.get_uptime_stats_range(start, end, kind="device")}
+    out = []
+    for key, name in names.items():
+        d = stats.get(key)
+        out.append({"key": key, "name": _short(name),
+                    "uptime_pct": d["uptime_pct"] if d else 100.0,
+                    "downtime_seconds": d["downtime_seconds"] if d else 0,
+                    "incidents": d["incidents"] if d else 0})
+    out.sort(key=lambda x: (x["uptime_pct"] if x["uptime_pct"] is not None else 100.0, x["name"]))
+    return out
+
+
+def _avg_uptime(links: List[Dict]) -> Optional[float]:
+    vals = [l["uptime_pct"] for l in links if l.get("uptime_pct") is not None]
+    return round(sum(vals) / len(vals), 3) if vals else None
+
+
 def _build_period_data(start: datetime.datetime, end: datetime.datetime,
                        period_label: str, prev_start: datetime.datetime,
                        prev_end: datetime.datetime, prev_label: str,
@@ -222,13 +255,20 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     total_downtime = sum(i["duration_seconds"] for i in incidents)
     site_incidents = [i for i in incidents if i["kind"] == "site"]
     device_incidents = [i for i in incidents if i["kind"] == "device"]
-    # Log ISP mati (kind "site" = koneksi/link ISP per lokasi): lengkap dgn jam & durasi.
-    # Perangkat (Netwatch) sengaja tidak ikut — cuma ISP.
+    # Log ISP mati = perangkat Netwatch yang namanya mengandung "ISP" (Indibiz, Biznet ISP, dst).
+    # Jenis "site" (ping lewat VPN) tidak dipakai karena tidak mewakili link ISP-nya.
+    isp_dev = [i for i in device_incidents if "isp" in (i["name"] or "").lower()]
+    isp_dev.sort(key=lambda i: i["down_at"] or "")
     isp_incidents = [
         {"name": _short(i["name"]), "down_at": i["down_at"], "up_at": i["up_at"],
          "duration_seconds": i["duration_seconds"], "ongoing": i["ongoing"]}
-        for i in site_incidents
+        for i in isp_dev
     ]
+    isp_downtime = sum(i["duration_seconds"] for i in isp_dev)
+    isp_links = _isp_link_stats(start, end)
+    isp_uptime = _avg_uptime(isp_links)
+    prev_isp_uptime = _avg_uptime(_isp_link_stats(prev_start, prev_end))
+    other_device_incidents = len(device_incidents) - len(isp_dev)
 
     up_vals = [s["uptime_pct"] for s in sites if s.get("uptime_pct") is not None]
     avg_uptime = round(sum(up_vals) / len(up_vals), 3) if up_vals else None
@@ -253,6 +293,12 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
         "total_downtime_seconds": total_downtime,
         "total_downtime_human": _fmt_dur(total_downtime),
         "isp_incidents": isp_incidents,
+        "isp_links": isp_links,
+        "isp_uptime_pct": isp_uptime,
+        "prev_isp_uptime_pct": prev_isp_uptime,
+        "isp_downtime_seconds": isp_downtime,
+        "isp_downtime_human": _fmt_dur(isp_downtime),
+        "other_device_incidents": other_device_incidents,
         "sites": sites,
         "flapping_devices": flapping,
         "worst_site": worst,
@@ -282,44 +328,33 @@ def build_monthly_data(year: int, month: int) -> Dict:
 # ─────────────────────────── ringkasan AI ───────────────────────────
 
 _SYSTEM_PROMPT = (
-    "Peran: Network Operations Center (NOC) Analyst senior. Kamu menyusun "
-    "Laporan Operasional Jaringan periodik yang akan dibaca oleh manajemen "
-    "(Manager IT / Direksi). Gunakan Bahasa Indonesia baku, ringkas, dan "
-    "profesional. Bahasa lugas, tanpa istilah teknis yang tidak dijelaskan, "
-    "tanpa kata santai/gaul, tanpa basa-basi.\n\n"
-    "Tulis dengan struktur PERSIS berikut (tulis judul bagian di baris sendiri, "
-    "tanpa nomor, tanpa tanda '#' atau '**'):\n\n"
-    "Status Keseluruhan\n"
-    "Satu baris: pilih salah satu -> BAIK / PERLU PERHATIAN / KRITIS, diikuti "
-    "satu kalimat alasan singkat.\n\n"
-    "Ringkasan Eksekutif\n"
-    "3-6 kalimat yang MENGANALISIS, bukan sekadar mengulang angka: kondisi "
-    "keandalan (uptime & insiden), beban jaringan (bandwidth), kualitas koneksi "
-    "(latency & packet loss), jumlah pengguna aktif dan sebarannya per lokasi "
-    "utama, tren dibanding periode sebelumnya (membaik/memburuk/stabil), dan "
-    "implikasinya bagi operasional/pengguna.\n\n"
-    "Keandalan & Gangguan\n"
-    "Bullet. Jelaskan insiden penting: perangkat/site mana, berapa kali, berapa "
-    "lama, dan DAMPAK-nya (mis. 'mengganggu koneksi gudang X'). Bedakan gangguan "
-    "sesaat vs berkepanjangan. Kalau bersih, tulis satu bullet bahwa tidak ada "
-    "gangguan berarti.\n\n"
-    "Kualitas Koneksi (Latency & Packet Loss)\n"
-    "Bullet. Nilai latency & packet loss tiap link: bagus (<20 ms, loss ~0%), "
-    "wajar (20-80 ms), atau buruk (>80 ms atau loss tinggi). Soroti link "
-    "terburuk dan dampaknya ke pengalaman pengguna. PENTING: untuk link yang "
-    "'diukur lewat VPN', nyatakan bahwa angka latency-nya mencerminkan kesehatan "
-    "jalur VPN, bukan mutu ISP di site itu.\n\n"
-    "Kapasitas & Beban Bandwidth\n"
-    "Bullet. Soroti site dengan utilisasi puncak tinggi (>80%) atau melebihi "
-    "kapasitas; jelaskan risikonya dan kaitkan dengan jumlah pengguna di lokasi "
-    "tsb (mis. 'berpotensi lambat saat jam sibuk bagi 214 pengguna'). Sebutkan "
-    "juga kondisi yang masih sehat secara ringkas.\n\n"
-    "Rekomendasi\n"
-    "Bullet, diurutkan dari prioritas tertinggi. Setiap butir: tindakan konkret "
-    "+ alasan singkat. Bedakan tindakan segera vs pemantauan.\n\n"
-    "Aturan: JANGAN mengarang angka di luar data. Jika data periode belum penuh "
-    "atau pembanding tidak tersedia, nyatakan keterbatasan itu secara eksplisit "
-    "di Ringkasan Eksekutif. Jangan gunakan tabel. Total panjang 250-400 kata."
+    "Kamu menulis ringkasan laporan jaringan untuk dibaca lewat WhatsApp oleh "
+    "orang AWAM (bukan teknisi). Bahasa Indonesia sederhana, singkat, jelas, "
+    "tanpa basa-basi. Hindari istilah teknis (latency, packet loss, utilisasi, "
+    "VPN, MTTR). Ganti dengan 'koneksi lambat', 'koneksi putus-putus', "
+    "'jalur internet penuh'. Jelaskan ARTI angka bagi pengguna, jangan cuma "
+    "mengulang angka.\n\n"
+    "Tulis dengan format PERSIS berikut (judul di baris sendiri, tanpa nomor, "
+    "tanpa tanda '#' atau '**'):\n\n"
+    "Status\n"
+    "Satu baris: BAIK / PERLU PERHATIAN / KRITIS + alasan satu kalimat pendek.\n\n"
+    "Internet\n"
+    "2-3 bullet (awali '- '). Sebut internet/ISP yang mati: lokasi, tanggal & jam, "
+    "lama, dan dampaknya ke pengguna. Kalau tidak ada yang mati, tulis "
+    "'- Tidak ada internet mati.' Sebut uptime internet dan bandingkan dengan "
+    "periode lalu kalau ada.\n\n"
+    "Bandwidth\n"
+    "2-3 bullet (awali '- '). Jelaskan bandwidth = kapasitas jalur internet "
+    "(seperti lebar jalan). Sebut lokasi yang puncak pemakaiannya penuh (>=90%) "
+    "dan artinya (internet terasa lambat saat jam sibuk, untuk berapa pengguna). "
+    "Sebut juga lokasi yang masih lega. Kalau puncak lebih dari 100%, jelaskan "
+    "itu lonjakan sesaat melebihi kapasitas.\n\n"
+    "Perlu Tindakan\n"
+    "1-3 bullet (awali '- '), paling prioritas dulu, satu kalimat pendek tiap "
+    "butir. Kalau tidak ada: '- Tidak ada, kondisi aman.'\n\n"
+    "Aturan: JANGAN mengarang angka/penyebab di luar data. Tulis nama ISP PERSIS "
+    "seperti di data (Indibiz, Biznet, Indihome - jangan tertukar). Kalau data "
+    "periode belum penuh, sebut singkat. Tanpa tabel. Total MAKSIMAL 170 kata."
 )
 
 
@@ -330,10 +365,12 @@ def _narrative_prompt(data: Dict) -> str:
                if pu is None else f" (periode sebelumnya {pu}%)")
     lines = [
         f"Periode: {data['period_label']}.",
-        f"Rata-rata uptime site: {('belum ada data' if du is None else str(du) + '%')}{cmp_txt}.",
-        f"Total insiden: {data['total_incidents']} "
-        f"({data['total_site_incidents']} site, {data['total_device_incidents']} perangkat). "
-        f"Akumulasi downtime: {data['total_downtime_human']}.",
+        f"Uptime internet (rata-rata link ISP dari Netwatch): "
+        f"{('belum ada data' if data.get('isp_uptime_pct') is None else str(data['isp_uptime_pct']) + '%')}"
+        + ("" if data.get("prev_isp_uptime_pct") is None else f" (periode lalu {data['prev_isp_uptime_pct']}%)")
+        + ".",
+        f"Internet/ISP mati: {len(data['isp_incidents'])}x, total {data['isp_downtime_human']}. "
+        f"Insiden perangkat lain (bukan ISP): {data['other_device_incidents']}.",
     ]
     if data.get("data_incomplete"):
         lines.append("CATATAN PENTING: pencatatan periode ini belum penuh (baru sebagian), "
@@ -368,16 +405,22 @@ def _narrative_prompt(data: Dict) -> str:
 
     isp = data.get("isp_incidents") or []
     if isp:
-        lines.append(f"\nKejadian ISP mati ({len(isp)}x; jam mati -> jam pulih, durasi):")
+        lines.append(f"\nKejadian internet/ISP mati (sumber Netwatch; {len(isp)}x; jam mati -> jam pulih, durasi):")
         for i in isp[:40]:
             up = i["up_at"] or "masih mati"
             lines.append(f"- {i['name']}: {i['down_at']} -> {up}, {_fmt_dur(i['duration_seconds'])}")
-        lines.append("(Sebutkan kejadian ISP mati di bagian Keandalan & Gangguan lengkap dengan "
-                     "nama ISP/lokasi, jam, dan durasinya.)")
+        lines.append("(Sebutkan kejadian ISP mati di Poin Penting lengkap dengan "
+                     "nama ISP/lokasi, tanggal & jam, dan durasinya.)")
     else:
         lines.append("\nTidak ada kejadian ISP mati pada periode ini.")
 
-    lines.append("\nUptime per site:")
+    if data.get("isp_links"):
+        lines.append("\nUptime tiap link ISP (Netwatch):")
+        for l in data["isp_links"]:
+            lines.append(f"- {l['name']}: {l['uptime_pct']}% | mati {l['incidents']}x, "
+                         f"total {_fmt_dur(l['downtime_seconds'])}")
+
+    lines.append("\nUptime per site (ping, bukan status ISP):")
     for s in data["sites"]:
         d = "" if s["delta_pct"] is None else f", perubahan {s['delta_pct']:+.2f} poin"
         lines.append(f"- {s['label']}: {s['uptime_pct']}% | {s['incidents']} insiden | "
@@ -465,37 +508,88 @@ def _narrative_anthropic(prompt: str) -> Optional[str]:
 # ───────────────── teks WhatsApp ─────────────────
 # PDF-nya dibuat di app._generate_periodic_report (pakai layout laporan harian).
 
-def _wa_text(data: Dict, narrative: Optional[str], title: str) -> str:
-    du = data["avg_uptime_pct"]
-    pu = data["prev_avg_uptime_pct"]
+def _wa_narrative(text: str) -> str:
+    """Rapikan keluaran AI untuk WhatsApp: judul tebal, bullet pakai titik."""
+    heads = ("status", "internet", "bandwidth", "perlu tindakan")
+    bullet = "•"
+    out = []
+    for ln in (text or "").strip().splitlines():
+        ln = re.sub(r"[*#`]+", "", ln).strip()
+        if not ln:
+            if out and out[-1] != "":
+                out.append("")
+            continue
+        if ln.lower().rstrip(":") in heads:
+            out.append("*" + ln.rstrip(":") + "*")
+        elif ln[0] in ("-", bullet):
+            out.append(bullet + " " + ln.lstrip("-" + bullet + " ").strip())
+        else:
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+def _wa_bandwidth_block(data: Dict) -> str:
+    rows = [b for b in (data.get("bandwidth") or []) if b.get("capacity")]
+    if not rows:
+        return ""
+    lines = ["📶 *Pemakaian Bandwidth*",
+             "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
+             "Rata-rata = pemakaian sehari-hari, Puncak = saat paling ramai. "
+             "Puncak 90% ke atas = jalur penuh, internet terasa lambat._"]
+    for b in rows[:8]:
+        cap = b["capacity"]
+        u = b["util_pct"]
+        icon = "🔴" if u >= 90 else ("🟠" if u >= 70 else "🟢")
+        ket = "PENUH" if u >= 90 else ("PADAT" if u >= 70 else "LEGA")
+        tag = " (cadangan)" if b.get("is_standby") else ""
+        avg_pct = round(100.0 * b["avg_mbps"] / cap) if cap else 0
+        lines.append(
+            f"\n{icon} *{b['label']}*{tag} - {ket}\n"
+            f"   Kapasitas : {cap:g} Mbps\n"
+            f"   Rata-rata : {b['avg_mbps']:g} Mbps ({avg_pct}%)\n"
+            f"   Puncak    : {b['peak_mbps']:g} Mbps ({round(u)}%)")
+    return "\n".join(lines)
+
+
+def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool = False) -> str:
+    du = data.get("isp_uptime_pct")
+    pu = data.get("prev_isp_uptime_pct")
     delta = None if (du is None or pu is None) else round(du - pu, 3)
+    uptime = "-" if du is None else f"{du}%"
+    if delta is not None:
+        arrow = "🔺" if delta > 0 else ("🔻" if delta < 0 else "➖")
+        uptime += f" ({arrow} {delta:+.2f} poin vs periode lalu)"
+    isp = data.get("isp_incidents") or []
     head = (
-        f"[{title.upper()}]\n{data['period_label']}\n"
-        f"Uptime rata-rata: {('-' if du is None else str(du) + '%')}"
-        + ("" if delta is None else f" ({delta:+.2f} poin vs periode lalu)")
-        + f"\nInsiden: {data['total_incidents']} | Downtime: {data['total_downtime_human']}"
+        f"📊 *{title.upper()}*\n"
+        f"🗓️ _{data['period_label']}_\n"
+        "━━━━━━━━━━━━━━\n"
+        f"📈 Uptime internet  : *{uptime}*\n"
+        f"🌐 Internet mati    : *{len(isp)}x*"
+        + (f" (total {data['isp_downtime_human']})" if isp else "")
     )
     if data.get("clients_total") is not None:
-        head += f" | Klien aktif: {data['clients_total']}"
-    worst = data.get("worst_site")
-    if worst:
-        head += f"\nSite terparah: {_short(worst['name'])} ({worst['uptime_pct']}%, {worst['incidents']} insiden)"
-    isp = data.get("isp_incidents") or []
+        head += f"\n👥 Klien aktif      : *{data['clients_total']}*"
+    links = data.get("isp_links") or []
+    if links:
+        head += "\n\n🌐 *Uptime per Link ISP*"
+        for l in links:
+            ic = "🟢" if (l["uptime_pct"] or 0) >= 99.9 else ("🟠" if (l["uptime_pct"] or 0) >= 99 else "🔴")
+            head += f"\n{ic} {l['name']}: {l['uptime_pct']}%"
     if isp:
-        head += f"\n\nISP MATI ({len(isp)}x):"
+        head += "\n\n🔴 *Detail Internet Mati*"
         for i in isp[:10]:
             up = i["up_at"][5:16] if i["up_at"] else "masih mati"
-            head += f"\n- {i['name']}: {i['down_at'][5:16]} -> {up} ({_fmt_dur(i['duration_seconds'])})"
+            head += f"\n• {i['name']}: {i['down_at'][5:16]} ➜ {up} ({_fmt_dur(i['duration_seconds'])})"
         if len(isp) > 10:
-            head += f"\n- ... +{len(isp) - 10} lagi (lihat PDF)"
+            head += f"\n• _... +{len(isp) - 10} lagi (lihat PDF)_"
     else:
-        head += "\n\nISP MATI: tidak ada."
+        head += "\n\n✅ *Internet mati:* tidak ada"
+    bw = _wa_bandwidth_block(data)
+    if bw:
+        head += "\n\n" + bw
     if narrative:
-        body = narrative.strip()
-        if len(body) > 2600:
-            body = body[:2600].rsplit("\n", 1)[0] + "\n..."
-        head += "\n\n" + body
-    head += "\n\n(PDF lengkap menyusul)"
+        head += "\n\n━━━━━━━━━━━━━━\n🤖 *Ringkasan AI*\n" + _wa_narrative(narrative)
+    head += ("\n\n📎 _PDF lengkap menyusul._" if pdf_follows
+             else "\n\n📧 _PDF lengkap dikirim ke email._")
     return head
-
-

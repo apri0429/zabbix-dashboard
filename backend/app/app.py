@@ -82,9 +82,13 @@ WA_TO = [n.strip() for n in os.getenv("WA_TO", "").split(",") if n.strip()]
 WA_WEB_URL = os.getenv("WA_WEB_URL", "http://127.0.0.1:3100/send")
 WA_WEB_FILE_URL = os.getenv("WA_WEB_FILE_URL", WA_WEB_URL.rsplit("/", 1)[0] + "/send-file")
 WA_WEB_SECRET = os.getenv("WA_WEB_SECRET", "")
+FONNTE_TOKEN = os.getenv("FONNTE_TOKEN", "")
+FONNTE_URL = os.getenv("FONNTE_URL", "https://api.fonnte.com/send")
 
 # Rekap NOC bulanan (narasi AI + PDF, dikirim tiap tanggal 1 untuk bulan sebelumnya)
 NOC_REPORT_ENABLED = os.getenv("NOC_REPORT_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+# false = WA hanya berisi teks ringkasan AI; PDF lengkap cukup lewat email
+NOC_REPORT_WA_SEND_PDF = os.getenv("NOC_REPORT_WA_SEND_PDF", "false").lower() in ("1", "true", "yes", "on")
 
 BASE_OUTPUT_DIR = os.getenv("BASE_OUTPUT_DIR", r"C:\Zabbix")
 REPORT_PATH = os.path.join(BASE_OUTPUT_DIR, "Zabbix_Report.pdf")
@@ -1678,7 +1682,8 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                      "kualitas koneksi (latency & packet loss)", "kualitas koneksi",
                      "kapasitas & beban bandwidth", "kapasitas & beban",
                      "kapasitas dan beban bandwidth", "rekomendasi",
-                     "site yang perlu perhatian", "pola berulang")
+                     "site yang perlu perhatian", "pola berulang",
+                     "status", "poin penting", "perlu tindakan", "internet", "bandwidth")
         for para in ai_summary.split("\n"):
             para = _lat1(re.sub(r"[*#`]+", "", para).strip())
             para = re.sub(r"^\d+[\.\)]\s*", "", para)
@@ -1707,8 +1712,8 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.set_font("Helvetica", "I", 7.4)
         pdf.set_text_color(*_C_MUTED)
         pdf.multi_cell(0, 4.2,
-            "Daftar seluruh kejadian koneksi ISP putus pada periode ini (perangkat tidak "
-            "dihitung). Kedipan di bawah 1 menit tidak dicatat sebagai kejadian.", align="L")
+            "Daftar kejadian internet/ISP mati berdasarkan pemantauan Netwatch MikroTik "
+            "pada periode ini. Kedipan di bawah 1 menit tidak dicatat sebagai kejadian.", align="L")
         pdf.ln(2)
         if not isp_incidents:
             pdf.set_font("Helvetica", "B", 8.5)
@@ -3093,24 +3098,71 @@ def _alert_location(change: Dict) -> str:
     return "-"
 
 
+_ALERT_ICON_RULES = (
+    (("cctv", "cam", "nvr", "dvr", "hikvision", "dahua"), "📹"),
+    (("isp", "internet", "wan", "indihome", "telkom", "biznet", "iconnet", "fiber", "fo "), "🌐"),
+    (("ap ", "ap-", "wifi", "wi-fi", "access point", "unifi"), "📶"),
+    (("router", "mikrotik", "gateway"), "📡"),
+    (("switch",), "🔀"),
+    (("server", "nas", "proxmox"), "🖥️"),
+    (("printer",), "🖨️"),
+)
+
+
+def _alert_icon(change: Dict) -> str:
+    """Pilih emoji sesuai jenis perangkat dari namanya (CCTV, internet, AP, dst)."""
+    name = f"{change.get('name') or ''} ".lower()
+    for words, icon in _ALERT_ICON_RULES:
+        if any(w in name for w in words):
+            return icon
+    return "🏢" if change.get("kind") == "site" else "📟"
+
+
 def _format_noc_alert(change: Dict) -> str:
     old_state = change.get("old_state") or "-"
     new_state = change.get("new_state") or "-"
     kind = "Site" if change.get("kind") == "site" else "Perangkat"
-    status = "DOWN" if new_state == "DOWN" else "PULIH"
-    icon = "[ALERT]" if new_state == "DOWN" else "[OK]"
-    return (
-        f"{icon} NOC {status}\n"
-        f"Jenis: {kind}\n"
-        f"Nama: {change.get('name') or '-'}\n"
-        f"Lokasi: {_alert_location(change)}\n"
-        f"Status: {old_state} -> {new_state}\n"
-        f"Waktu: {change.get('changed_at') or '-'}"
-    )
+    is_down = new_state == "DOWN"
+    head = "🔴 *NOC ALERT — DOWN*" if is_down else "✅ *NOC — UP*"
+    kind_icon = _alert_icon(change)
+    lokasi = _alert_location(change)
+    lines = [
+        head,
+        "━━━━━━━━━━━━━━",
+        f"{kind_icon} *{change.get('name') or '-'}*",
+        f"▫️ Jenis   : {kind}",
+    ]
+    if lokasi != "-":
+        lines.append(f"📍 Lokasi : {lokasi}")
+    lines += [
+        f"🔄 Status  : {old_state} ➜ *{new_state}*",
+    ]
+    if not is_down and change.get("duration_seconds") is not None:
+        if change.get("down_at"):
+            lines.append(f"🔻 Mati     : {change['down_at']}")
+        lines.append(f"🔼 Pulih    : {change.get('changed_at') or '-'}")
+        lines.append(f"⏳ Durasi   : *{noc_report._fmt_dur(change['duration_seconds'])}*")
+    else:
+        lines.append(f"🕐 Waktu   : {change.get('changed_at') or '-'}")
+    lines += [
+        "━━━━━━━━━━━━━━",
+        "⚠️ _Mohon segera dicek._" if is_down else "👍 _Layanan kembali normal._",
+    ]
+    return "\n".join(lines)
 
 
 def _send_whatsapp_message(message: str):
     if not WA_ALERT_ENABLED:
+        return
+    if WA_ALERT_MODE == "fonnte":
+        if not (FONNTE_TOKEN and WA_TO):
+            logging.warning("NOC WA Fonnte aktif tapi FONNTE_TOKEN / WA_TO belum diisi")
+            return
+        # Fonnte menerima banyak nomor dipisah koma dalam satu request
+        r = requests.post(FONNTE_URL, headers={"Authorization": FONNTE_TOKEN},
+                          data={"target": ",".join(WA_TO), "message": message}, timeout=20)
+        if r.status_code >= 400 or '"status":false' in r.text.replace(" ", ""):
+            logging.warning("NOC WA Fonnte alert gagal: %s %s", r.status_code, r.text[:500])
         return
     if WA_ALERT_MODE == "web":
         if not WA_TO:
@@ -3146,12 +3198,39 @@ def _send_whatsapp_message(message: str):
             logging.warning("NOC WA alert gagal ke %s: %s %s", to, r.status_code, r.text[:500])
 
 
+# Alert DOWN baru dikirim kalau mati terus >= WA_ALERT_MIN_DOWN_SECONDS (anti-spam
+# untuk putus sesaat). Kalau sudah pulih sebelum itu, tidak ada WA sama sekali.
+WA_ALERT_MIN_DOWN_SECONDS = int(os.getenv("WA_ALERT_MIN_DOWN_SECONDS", "180"))
+_WA_PENDING_DOWN: Dict[str, Dict] = {}   # key -> {"change", "since", "notified"}
+
+
 def _send_noc_alerts(transitions: List[Dict]):
+    now = time.time()
     for change in transitions or []:
+        key = change.get("key")
+        if not key:
+            continue
+        if change.get("new_state") == "DOWN":
+            _WA_PENDING_DOWN[key] = {"change": change, "since": now, "notified": False}
+        elif change.get("old_state") == "DOWN":
+            entry = _WA_PENDING_DOWN.pop(key, None)
+            if entry and entry["notified"]:
+                try:
+                    change = dict(change, down_at=entry["change"].get("changed_at"),
+                                  duration_seconds=int(now - entry["since"]))
+                    _send_whatsapp_message(_format_noc_alert(change))
+                except Exception:
+                    logging.exception("NOC WA alert pulih gagal dikirim")
+            # belum sempat dikirim DOWN-nya -> putus singkat, abaikan
+
+    for key, entry in list(_WA_PENDING_DOWN.items()):
+        if entry["notified"] or now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS:
+            continue
+        entry["notified"] = True
         try:
-            _send_whatsapp_message(_format_noc_alert(change))
+            _send_whatsapp_message(_format_noc_alert(entry["change"]))
         except Exception:
-            logging.exception("NOC WA alert gagal dikirim")
+            logging.exception("NOC WA alert down gagal dikirim")
 
 
 def _poll_noc_history():
@@ -3177,7 +3256,7 @@ def _poll_noc_history():
 
     try:
         transitions = noc_history.record_snapshot(entities)
-        _send_noc_alerts(transitions)
+        _send_noc_alerts(transitions)  # tetap dipanggil walau kosong: cek down yg sudah lewat batas
     except Exception:
         traceback.print_exc()
 
@@ -3276,6 +3355,21 @@ def _wa_send_file(path: str, caption: str = ""):
         logging.warning("Rekap NOC: WA belum aktif / WA_TO kosong — file tidak dikirim")
         return
     fname = os.path.basename(path)
+
+    if WA_ALERT_MODE == "fonnte":
+        # Upload file via multipart (fitur kirim file butuh paket Fonnte yang mendukung)
+        try:
+            with open(path, "rb") as f:
+                r = requests.post(
+                    FONNTE_URL, headers={"Authorization": FONNTE_TOKEN}, timeout=90,
+                    data={"target": ",".join(WA_TO), "message": caption, "filename": fname},
+                    files={"file": (fname, f, "application/pdf")},
+                )
+            if r.status_code >= 400 or '"status":false' in r.text.replace(" ", ""):
+                logging.warning("Rekap NOC: kirim file Fonnte gagal: %s %s", r.status_code, r.text[:400])
+        except Exception:
+            logging.exception("Rekap NOC: kirim file (fonnte) gagal")
+        return
 
     if WA_ALERT_MODE == "web":
         headers = {"Content-Type": "application/json"}
@@ -3390,7 +3484,8 @@ def _send_noc_report(result: Dict, title: str = "Rekap NOC"):
         _send_whatsapp_message(result["wa_text"])
     except Exception:
         logging.exception("Rekap NOC: kirim teks WA gagal")
-    _wa_send_file(result["pdf_path"], caption=result["period_label"])
+    if NOC_REPORT_WA_SEND_PDF:
+        _wa_send_file(result["pdf_path"], caption=result["period_label"])
     _send_noc_report_email(result, title)
 
 
@@ -3411,7 +3506,7 @@ def _generate_periodic_report(start_dt: datetime.datetime, end_dt: datetime.date
     return {
         "pdf_path": pdf_path, "pdf_name": pdf_name,
         "period_label": data["period_label"],
-        "wa_text": noc_report._wa_text(data, narrative, title),
+        "wa_text": noc_report._wa_text(data, narrative, title, pdf_follows=NOC_REPORT_WA_SEND_PDF),
         "narrative": narrative, "has_ai": bool(narrative), "data": data,
     }
 
