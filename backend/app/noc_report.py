@@ -530,12 +530,18 @@ def _wa_narrative(text: str) -> str:
     return "\n".join(out).strip()
 
 
+def _busy_hours_label() -> str:
+    m = re.fullmatch(r"\s*(\d{1,2})\s*-\s*(\d{1,2})\s*", os.getenv("BANDWIDTH_BUSY_HOURS", "07-17"))
+    return f"{int(m.group(1)):02d}:00-{int(m.group(2)):02d}:00" if m else "24 jam"
+
+
 def _wa_bandwidth_block(data: Dict) -> str:
     rows = [b for b in (data.get("bandwidth") or []) if b.get("capacity")]
     if not rows:
         return ""
     lines = ["📶 *Pemakaian Bandwidth*",
              "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
+             f"Dinilai pada jam kerja ({_busy_hours_label()}). "
              "Rata-rata = pemakaian sehari-hari, Puncak = lonjakan tertinggi sesaat. "
              "Status sama dengan PDF: dinilai dari pemakaian yang berlangsung lama, "
              "jadi lonjakan sesaat belum tentu berarti jalur penuh terus._"]

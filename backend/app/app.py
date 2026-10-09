@@ -838,8 +838,27 @@ def calculate_bandwidth_stats(values_mbps: List[float], capacity_mbps: float) ->
     }
 
 
+# Penilaian beban hanya pada jam kerja ("busy hour"); malam yang sepi tidak boleh
+# mengencerkan rata-rata/P95. Format "JJ-JJ" (mis. 07-17); kosong = 24 jam penuh.
+def _parse_busy_hours(raw: str) -> Optional[Tuple[int, int]]:
+    m = re.fullmatch(r"\s*(\d{1,2})\s*-\s*(\d{1,2})\s*", raw or "")
+    if not m:
+        return None
+    lo, hi = int(m.group(1)), int(m.group(2))
+    return (lo, hi) if 0 <= lo < hi <= 24 else None
+
+
+BANDWIDTH_BUSY_HOURS = _parse_busy_hours(os.getenv("BANDWIDTH_BUSY_HOURS", "07-17"))
+
+
 def get_stats_from_itemid(itemid: str, capacity_mbps: float, start_ts: int, end_ts: int) -> Dict[str, float]:
     hist = get_item_history(itemid, start_ts, end_ts)
+    if BANDWIDTH_BUSY_HOURS:
+        lo, hi = BANDWIDTH_BUSY_HOURS
+        in_window = [h for h in hist
+                     if "value" in h and lo <= datetime.datetime.fromtimestamp(int(h["clock"])).hour < hi]
+        if in_window:           # kalau periode terlalu pendek / tak ada data jam kerja, pakai semua
+            hist = in_window
     values_mbps = [float(h["value"]) / 1_000_000 for h in hist if "value" in h]
     return calculate_bandwidth_stats(values_mbps, capacity_mbps)
 
