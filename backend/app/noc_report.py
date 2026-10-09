@@ -539,9 +539,8 @@ def _wa_bandwidth_block(data: Dict) -> str:
     rows = [b for b in (data.get("bandwidth") or []) if b.get("capacity")]
     if not rows:
         return ""
-    lines = ["📶 *Pemakaian Bandwidth*",
+    lines = [f"📶 *Pemakaian Bandwidth - Jam Kerja {_busy_hours_label()}*",
              "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
-             f"Dinilai pada jam kerja ({_busy_hours_label()}). "
              "Rata-rata = pemakaian sehari-hari, Puncak = lonjakan tertinggi sesaat. "
              "Status sama dengan PDF: dinilai dari pemakaian yang berlangsung lama, "
              "jadi lonjakan sesaat belum tentu berarti jalur penuh terus._"]
