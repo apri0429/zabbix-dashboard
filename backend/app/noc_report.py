@@ -548,12 +548,7 @@ def _wa_bandwidth_block(data: Dict) -> str:
     if not rows:
         return ""
     rows.sort(key=lambda b: b.get("idx", 0))
-    lines = [f"📶 *Pemakaian Bandwidth - Jam Kerja {_busy_hours_label()}*",
-             "_Bandwidth = kapasitas jalur internet (seperti lebar jalan). "
-             "Angka sama dengan tabel di PDF. Rata-rata = pemakaian sehari-hari, "
-             "Puncak = lonjakan tertinggi sesaat. Status dinilai dari pemakaian yang "
-             "berlangsung lama (Skor), jadi lonjakan sesaat belum tentu berarti jalur "
-             "penuh terus._"]
+    lines = [f"📶 *Pemakaian Bandwidth - Jam Kerja {_busy_hours_label()}*"]
     for b in rows:
         st = (b.get("status") or "").upper()
         icon = {"TINGGI": "🔴", "PADAT": "🟠", "STABIL": "🟢"}.get(st, "⚪")
@@ -565,6 +560,27 @@ def _wa_bandwidth_block(data: Dict) -> str:
             f"   Puncak    : ⬇ {b['peak_down']:g} | ⬆ {b['peak_up']:g} Mbps\n"
             f"   Skor      : {b['score']:g}%")
     return "\n".join(lines)
+
+
+def _wa_latency_block(data: Dict) -> str:
+    """Kualitas koneksi (latensi & packet loss), sama dengan tabel di PDF."""
+    rows = [b for b in (data.get("bandwidth") or []) if b.get("latency_avg_ms") is not None]
+    if not rows:
+        return ""
+    rows.sort(key=lambda b: b.get("idx", 0))
+    lines = ["📡 *Kualitas Koneksi - Latensi & Packet Loss*"]
+    for b in rows:
+        q = (b.get("quality") or "").upper()
+        icon = {"BAIK": "🟢", "CUKUP": "🟠", "BURUK": "🔴"}.get(q, "⚪")
+        tag = " _(via VPN)_" if b.get("vpn_measured") else ""
+        lines.append(
+            f"\n{icon} *{b['label']}*{tag} - {q or '-'}\n"
+            f"   Latensi   : {b['latency_avg_ms']:g} ms (P95 {b['latency_p95_ms']:g} ms)\n"
+            f"   Packet loss : {b['loss_avg_pct']:.1f}%")
+    lines.append("\n_(via VPN) = diukur lewat jalur VPN, mencerminkan kesehatan VPN, "
+                 "bukan mutu ISP di lokasi itu._"
+                 if any(b.get("vpn_measured") for b in rows) else "")
+    return "\n".join(l for l in lines if l is not None)
 
 
 def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool = False) -> str:
@@ -604,6 +620,9 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
     bw = _wa_bandwidth_block(data)
     if bw:
         head += "\n\n" + bw
+    lat = _wa_latency_block(data)
+    if lat:
+        head += "\n\n" + lat
     if narrative:
         head += "\n\n━━━━━━━━━━━━━━\n🤖 *Ringkasan AI*\n" + _wa_narrative(narrative)
     head += ("\n\n📎 _PDF lengkap menyusul._" if pdf_follows
