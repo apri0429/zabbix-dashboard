@@ -31,7 +31,7 @@ import os
 import sqlite3
 import datetime
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 BASE_OUTPUT_DIR = os.getenv("BASE_OUTPUT_DIR", r"C:\Zabbix")
 DB_PATH = os.path.join(BASE_OUTPUT_DIR, "noc_history.db")
@@ -292,21 +292,31 @@ def get_blackouts_range(start_dt: datetime.datetime,
     finally:
         conn.close()
 
-    out = []
+    # Potong di batas window dulu.
+    clipped = []
     for r in rows:
         s = max(datetime.datetime.strptime(r["started_at"], _FMT), start_dt)
         e = min(datetime.datetime.strptime(r["ended_at"], _FMT), end_dt)
-        sec = (e - s).total_seconds()
-        if sec <= 0:
-            continue
-        out.append({
-            "started_at": s.strftime(_FMT),
-            "ended_at": e.strftime(_FMT),
-            "seconds": int(sec),
-            "full_started_at": r["started_at"],
-            "full_ended_at": r["ended_at"],
-        })
-    return out
+        if (e - s).total_seconds() > 0:
+            clipped.append((s, e))
+
+    # Gabung rentang yang bertumpuk/duplikat. Tabel noc_blackouts bisa memuat
+    # baris kembar untuk rentang yang sama (mis. record_monitoring_gap terpanggil
+    # dua kali saat startup); kalau dijumlah apa adanya, rentang itu terhitung
+    # ganda dan cakupan pemantauan dilaporkan lebih buruk dari kenyataan.
+    clipped.sort(key=lambda p: p[0])
+    merged: List[Tuple[datetime.datetime, datetime.datetime]] = []
+    for s, e in clipped:
+        if merged and s <= merged[-1][1]:
+            if e > merged[-1][1]:
+                merged[-1] = (merged[-1][0], e)
+        else:
+            merged.append((s, e))
+
+    return [{"started_at": s.strftime(_FMT),
+             "ended_at": e.strftime(_FMT),
+             "seconds": int((e - s).total_seconds())}
+            for s, e in merged]
 
 
 def get_coverage(start_dt: datetime.datetime, end_dt: datetime.datetime) -> Dict:
@@ -320,7 +330,8 @@ def get_coverage(start_dt: datetime.datetime, end_dt: datetime.datetime) -> Dict
     win_end = min(end_dt, now_dt)
     window_seconds = max(0.0, (win_end - start_dt).total_seconds())
     blackouts = get_blackouts_range(start_dt, win_end) if window_seconds else []
-    # Blackout tidak saling tumpang-tindih (dicatat berurutan), jadi boleh dijumlah.
+    # get_blackouts_range sudah menggabungkan rentang yang bertumpuk/duplikat,
+    # jadi penjumlahan di sini tidak menghitung rentang yang sama dua kali.
     blackout_seconds = sum(b["seconds"] for b in blackouts)
     blackout_seconds = min(blackout_seconds, window_seconds)
     monitored = max(0.0, window_seconds - blackout_seconds)
