@@ -40,6 +40,14 @@ NOC_REPORT_MODEL = os.getenv("NOC_REPORT_MODEL", "claude-opus-5").strip()
 _BULAN_ID = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
              "Agustus", "September", "Oktober", "November", "Desember"]
 
+# Cakupan pemantauan (persen periode yang benar-benar terpolling) minimal supaya
+# angka uptime/insiden layak disajikan tanpa peringatan.
+COVERAGE_OK_PCT = float(os.getenv("NOC_REPORT_MIN_COVERAGE_PCT", "90"))
+
+# Di bawah ini, angka periode dianggap tidak layak dipakai sebagai PEMBANDING tren
+# (mis. "100%" yang sebenarnya berarti "tidak ada data sama sekali").
+COVERAGE_TREND_PCT = float(os.getenv("NOC_REPORT_MIN_TREND_COVERAGE_PCT", "70"))
+
 
 # ─────────────────────────── util ───────────────────────────
 
@@ -86,6 +94,47 @@ def _fmt_dur(sec: Optional[float]) -> str:
 
 def _fmt_date_id(d: datetime.date) -> str:
     return f"{d.day} {_BULAN_ID[d.month]} {d.year}"
+
+
+def _fmt_pct(v: Optional[float], dec: int = 1) -> str:
+    """Persen untuk laporan manajemen: 1 desimal. Angka seperti 93.988% memberi
+    kesan presisi yang tidak dimiliki datanya."""
+    return "-" if v is None else f"{v:.{dec}f}%"
+
+
+def _fmt_mbps(v: Optional[float]) -> str:
+    """Selalu 2 desimal supaya kolom angka rata (0.00, bukan 0)."""
+    return "-" if v is None else f"{v:.2f}"
+
+
+def _fmt_ms(v: Optional[float]) -> str:
+    return "-" if v is None else f"{v:.1f} ms"
+
+
+def _fmt_dt_id(ts: Optional[str]) -> str:
+    """'2026-10-05 14:25:31' -> '05-10 14:25' (hari-bulan, sesuai format PDF).
+    Sebelumnya dipotong jadi '10-05 14:25' yang terbaca bulan-hari."""
+    if not ts:
+        return "-"
+    try:
+        dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return ts
+    return dt.strftime("%d-%m %H:%M")
+
+
+def _fmt_coverage_note(cov: Optional[Dict]) -> str:
+    """Satu baris peringatan kalau periode ini tidak terpantau penuh."""
+    if not cov or cov.get("coverage_pct") is None:
+        return ""
+    pct = cov["coverage_pct"]
+    if pct >= COVERAGE_OK_PCT:
+        return ""
+    jam = cov["blackout_seconds"] / 3600.0
+    return (f"Pemantauan hanya aktif {pct:.1f}% periode ini "
+            f"({cov['blackout_count']}x jeda, total {jam:.1f} jam tidak terpantau). "
+            "Jumlah insiden & total downtime di bawah ini adalah BATAS BAWAH — "
+            "gangguan yang mulai dan selesai saat pemantauan mati tidak tercatat.")
 
 
 def _strip_md(s: str) -> str:
@@ -150,8 +199,14 @@ def _bandwidth_summary(start: datetime.datetime, end: datetime.datetime) -> List
     for idx, r in enumerate(rows):
         peak = max(r.get("peak_download") or 0.0, r.get("peak_upload") or 0.0)
         util = max(r.get("max_peakraw_pct") or 0.0, r.get("max_avg_pct") or 0.0)
+        cap = r.get("capacity") or 0
         out.append({
             "idx": idx,
+            # Puncak di atas kapasitas langganan tidak mungkin terjadi secara fisik;
+            # biasanya artefak sampling/counter Zabbix atau kapasitas yang salah
+            # diisi. Ditandai supaya tidak dilaporkan sebagai lonjakan nyata.
+            "peak_over_capacity": bool(cap and peak > cap * 1.001),
+            "peak_pct_of_cap": round(100.0 * peak / cap, 1) if cap else None,
             "avg_down": round(r.get("avg_download") or 0.0, 2),
             "avg_up": round(r.get("avg_upload") or 0.0, 2),
             "peak_down": round(r.get("peak_download") or 0.0, 2),
@@ -193,19 +248,30 @@ def _client_snapshot() -> Tuple[Dict[str, Optional[int]], Optional[int]]:
 def _isp_link_stats(start: datetime.datetime, end: datetime.datetime) -> List[Dict]:
     """Uptime tiap link ISP (perangkat Netwatch yang namanya mengandung 'ISP').
     Link yang tidak pernah mati tetap ikut (uptime 100%)."""
+    # Satu entity_key bisa punya beberapa nama kalau komentar Netwatch di router
+    # pernah diganti (mis. "Biznet ISP", "Biznet ISP  Duta Garden"). Dulu dict ini
+    # diisi tanpa urutan, jadi nama yang terpakai berubah-ubah tiap kali laporan
+    # dibuat. Sekarang dipilih yang PALING SPESIFIK (terpanjang sesudah spasi
+    # ganda dirapikan), dengan nama alfabetis sebagai penentu kalau sama panjang.
     names: Dict[str, str] = {}
     try:
         conn = noc_history._connect()
         try:
-            for r in conn.execute("SELECT DISTINCT entity_key, entity_name FROM noc_events "
-                                  "WHERE kind='device'").fetchall():
-                if "isp" in (r["entity_name"] or "").lower():
-                    names[r["entity_key"]] = r["entity_name"]
+            rows = conn.execute("SELECT DISTINCT entity_key, entity_name FROM noc_events "
+                                "WHERE kind='device' ORDER BY entity_key, entity_name").fetchall()
         finally:
             conn.close()
+        cands: Dict[str, List[str]] = {}
+        for r in rows:
+            nm = re.sub(r"\s+", " ", (r["entity_name"] or "")).strip()
+            if "isp" in nm.lower():
+                cands.setdefault(r["entity_key"], []).append(nm)
+        for key, opts in cands.items():
+            names[key] = sorted(set(opts), key=lambda n: (-len(n), n))[0]
     except Exception:
         logging.exception("NOC report: gagal baca daftar link ISP")
-    stats = {d["key"]: d for d in noc_history.get_uptime_stats_range(start, end, kind="device")}
+    stats = {d["key"]: d for d in noc_history.get_uptime_stats_range(
+        start, end, kind="device", min_seconds=noc_history.REPORT_MIN_INCIDENT_SECONDS)}
     out = []
     for key, name in names.items():
         d = stats.get(key)
@@ -230,10 +296,26 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     window_sec = (min(end, now) - start).total_seconds()
     full_sec = (end - start).total_seconds()
 
-    sites = noc_history.get_uptime_stats_range(start, end, kind="site")
-    devices = noc_history.get_uptime_stats_range(start, end, kind="device")
-    incidents = noc_history.get_downtime_log_range(start, end)
-    prev_sites = {s["key"]: s for s in noc_history.get_uptime_stats_range(prev_start, prev_end, kind="site")}
+    # Seberapa banyak periode ini (dan pembandingnya) benar-benar terpantau. Tanpa
+    # ini, backend yang sempat mati berhari-hari tetap menghasilkan "uptime 93%"
+    # dan "1 kejadian" yang terbaca seolah hasil pemantauan penuh.
+    coverage = noc_history.get_coverage(start, end)
+    prev_coverage = noc_history.get_coverage(prev_start, prev_end)
+    cov_pct = coverage.get("coverage_pct")
+    prev_cov_pct = prev_coverage.get("coverage_pct")
+    coverage_ok = cov_pct is None or cov_pct >= COVERAGE_OK_PCT
+    # Pembanding dipakai hanya kalau KEDUA periode cukup terpantau.
+    trend_ok = (cov_pct is not None and prev_cov_pct is not None
+                and cov_pct >= COVERAGE_TREND_PCT and prev_cov_pct >= COVERAGE_TREND_PCT)
+
+    # Laporan hanya memuat mati >= 10 menit (REPORT_MIN_INCIDENT_SECONDS); kedipan lebih
+    # pendek tidak dihitung di uptime, jumlah insiden, log, maupun total downtime.
+    _min = noc_history.REPORT_MIN_INCIDENT_SECONDS
+    sites = noc_history.get_uptime_stats_range(start, end, kind="site", min_seconds=_min)
+    devices = noc_history.get_uptime_stats_range(start, end, kind="device", min_seconds=_min)
+    incidents = noc_history.get_downtime_log_range(start, end, min_seconds=_min)
+    prev_sites = {s["key"]: s for s in noc_history.get_uptime_stats_range(
+        prev_start, prev_end, kind="site", min_seconds=_min)}
 
     seen = {s["key"] for s in sites}
     for label in _known_site_labels():
@@ -246,6 +328,8 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     for s in sites:
         prev = prev_sites.get(s["key"])
         pv = prev.get("uptime_pct") if prev else None
+        if not trend_ok:
+            pv = None          # periode pembanding tidak terpantau cukup
         s["prev_uptime_pct"] = pv
         s["delta_pct"] = (round(s["uptime_pct"] - pv, 3)
                           if pv is not None and s.get("uptime_pct") is not None else None)
@@ -273,13 +357,14 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     isp_downtime = sum(i["duration_seconds"] for i in isp_dev)
     isp_links = _isp_link_stats(start, end)
     isp_uptime = _avg_uptime(isp_links)
-    prev_isp_uptime = _avg_uptime(_isp_link_stats(prev_start, prev_end))
+    prev_isp_uptime = _avg_uptime(_isp_link_stats(prev_start, prev_end)) if trend_ok else None
     other_device_incidents = len(device_incidents) - len(isp_dev)
 
     up_vals = [s["uptime_pct"] for s in sites if s.get("uptime_pct") is not None]
     avg_uptime = round(sum(up_vals) / len(up_vals), 3) if up_vals else None
     prev_up_vals = [s["uptime_pct"] for s in prev_sites.values() if s.get("uptime_pct") is not None]
-    prev_avg_uptime = round(sum(prev_up_vals) / len(prev_up_vals), 3) if prev_up_vals else None
+    prev_avg_uptime = (round(sum(prev_up_vals) / len(prev_up_vals), 3)
+                       if prev_up_vals and trend_ok else None)
     worst = sites[0] if sites and sites[0]["incidents"] > 0 else None
 
     bandwidth = _bandwidth_summary(start, end)
@@ -311,7 +396,18 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
         "bandwidth": bandwidth,
         "clients": clients,
         "clients_total": clients_total,
-        "data_incomplete": window_sec < full_sec - 3600,
+        # Periode belum selesai (mis. laporan dibuat di tengah minggu)
+        "period_unfinished": window_sec < full_sec - 3600,
+        # Cakupan pemantauan
+        "coverage": coverage,
+        "coverage_pct": cov_pct,
+        "coverage_ok": coverage_ok,
+        "prev_coverage_pct": prev_cov_pct,
+        "trend_comparable": trend_ok,
+        "coverage_note": _fmt_coverage_note(coverage),
+        # Dipakai prompt AI & PDF: data periode ini tidak utuh, entah karena
+        # periodenya belum selesai ATAU karena pemantauan sempat mati.
+        "data_incomplete": (window_sec < full_sec - 3600) or not coverage_ok,
     }
 
 
@@ -346,17 +442,20 @@ _SYSTEM_PROMPT = (
     "Satu baris: BAIK / PERLU PERHATIAN / KRITIS + alasan satu kalimat pendek.\n\n"
     "Internet\n"
     "2-3 bullet (awali '- '). Sebut internet/ISP yang mati: lokasi, tanggal & jam, "
-    "lama, dan dampaknya ke pengguna. Kalau tidak ada yang mati, tulis "
-    "'- Tidak ada internet mati.' Sebut uptime internet dan bandingkan dengan "
-    "periode lalu kalau ada.\n\n"
+    "dan lamanya. Kalau tidak ada yang mati, tulis '- Tidak ada internet mati.' "
+    "Sebut uptime internet, dan bandingkan dengan periode lalu HANYA kalau data "
+    "pembandingnya diberikan. Jangan menyebut berapa pengguna terdampak suatu "
+    "gangguan - jumlah pengguna yang ada hanya hitungan saat laporan dibuat.\n\n"
     "Bandwidth\n"
     "2-3 bullet (awali '- '). Jelaskan bandwidth = kapasitas jalur internet "
     "(seperti lebar jalan). Pakai STATUS beban dari data (STABIL/PADAT/TINGGI) sebagai "
     "patokan - sama dengan PDF - jangan menilai sendiri dari angka puncak. Sebut lokasi "
     "berstatus TINGGI/PADAT dan artinya (internet bisa lambat saat jam sibuk, untuk "
     "berapa pengguna). Puncak sesaat tinggi tapi status STABIL = hanya lonjakan singkat. "
-    "Sebut juga lokasi yang masih lega. Kalau puncak lebih dari 100%, jelaskan "
-    "itu lonjakan sesaat melebihi kapasitas.\n\n"
+    "Sebut juga lokasi yang masih lega. Kalau data menandai puncak MELEBIHI kapasitas "
+    "langganan, itu kemungkinan besar salah ukur (angka di atas kecepatan paket itu "
+    "mustahil) - jangan laporkan sebagai kejadian nyata; cukup sebut sekali bahwa angka "
+    "puncak di lokasi itu perlu diverifikasi.\n\n"
     "Perlu Tindakan\n"
     "1-3 bullet (awali '- '), paling prioritas dulu, satu kalimat pendek tiap "
     "butir. Kalau tidak ada: '- Tidak ada, kondisi aman.'\n\n"
@@ -380,13 +479,30 @@ def _narrative_prompt(data: Dict) -> str:
         f"Internet/ISP mati: {len(data['isp_incidents'])}x, total {data['isp_downtime_human']}. "
         f"Insiden perangkat lain (bukan ISP): {data['other_device_incidents']}.",
     ]
-    if data.get("data_incomplete"):
-        lines.append("CATATAN PENTING: pencatatan periode ini belum penuh (baru sebagian), "
+    if not data.get("coverage_ok") and data.get("coverage_pct") is not None:
+        cov = data["coverage"]
+        lines.append(
+            f"CATATAN PENTING — CAKUPAN PEMANTAUAN: sistem pemantauan hanya aktif "
+            f"{data['coverage_pct']:.1f}% dari periode ini "
+            f"({cov['blackout_count']}x jeda, total {cov['blackout_seconds']/3600:.1f} jam mati). "
+            "Jumlah insiden & total downtime di atas adalah BATAS BAWAH: gangguan yang "
+            "mulai dan selesai saat pemantauan mati TIDAK tercatat. WAJIB sebutkan "
+            "keterbatasan ini di bagian Status, dan JANGAN menyatakan kondisi aman "
+            "hanya karena insiden tercatat sedikit.")
+    elif data.get("period_unfinished"):
+        lines.append("CATATAN PENTING: periode ini belum selesai (baru sebagian), "
                      "angka insiden/downtime kemungkinan lebih rendah dari kenyataan — sebutkan ini.")
+
+    if not data.get("trend_comparable"):
+        lines.append("JANGAN membandingkan dengan periode sebelumnya dan jangan menyebut "
+                     "naik/turun: data periode pembanding tidak terpantau cukup untuk "
+                     "dijadikan dasar tren.")
 
     ct = data.get("clients_total")
     if ct is not None:
-        lines.append(f"\nJumlah klien/pengguna aktif (snapshot saat laporan dibuat): {ct} total.")
+        lines.append(f"\nJumlah klien/pengguna aktif (snapshot saat laporan dibuat, "
+                     f"BUKAN jumlah pengguna saat gangguan terjadi — jangan pakai angka ini "
+                     f"untuk mengklaim berapa pengguna terdampak suatu outage): {ct} total.")
         detail = ", ".join(f"{_short(k)}: {v}" for k, v in (data.get("clients") or {}).items()
                            if isinstance(v, int))
         if detail:
@@ -553,12 +669,18 @@ def _wa_bandwidth_block(data: Dict) -> str:
         st = (b.get("status") or "").upper()
         icon = {"TINGGI": "🔴", "PADAT": "🟠", "STABIL": "🟢"}.get(st, "⚪")
         tag = " (cadangan)" if b.get("is_standby") else ""
+        # Puncak di atas kapasitas langganan mustahil secara fisik -> tandai
+        # sebagai perlu verifikasi, jangan disajikan seolah kejadian nyata.
+        warn = " ⚠️" if b.get("peak_over_capacity") else ""
         lines.append(
             f"\n{icon} *{b['label']}*{tag} - {st or '-'}\n"
             f"   Kapasitas : {b['capacity']:g} Mbps\n"
-            f"   Rata-rata : ⬇ {b['avg_down']:g} | ⬆ {b['avg_up']:g} Mbps\n"
-            f"   Puncak    : ⬇ {b['peak_down']:g} | ⬆ {b['peak_up']:g} Mbps\n"
-            f"   Skor      : {b['score']:g}%")
+            f"   Rata-rata : ⬇ {_fmt_mbps(b['avg_down'])} | ⬆ {_fmt_mbps(b['avg_up'])} Mbps\n"
+            f"   Puncak    : ⬇ {_fmt_mbps(b['peak_down'])} | ⬆ {_fmt_mbps(b['peak_up'])} Mbps{warn}\n"
+            f"   Skor      : {b['score']:.1f}%")
+    if any(b.get("peak_over_capacity") for b in rows):
+        lines.append("\n⚠️ _Puncak tercatat melebihi kapasitas langganan - "
+                     "kemungkinan salah ukur, perlu diverifikasi._")
     return "\n".join(lines)
 
 
@@ -575,11 +697,21 @@ def _wa_latency_block(data: Dict) -> str:
         tag = " _(via VPN)_" if b.get("vpn_measured") else ""
         lines.append(
             f"\n{icon} *{b['label']}*{tag} - {q or '-'}\n"
-            f"   Latensi   : {b['latency_avg_ms']:g} ms (P95 {b['latency_p95_ms']:g} ms)\n"
+            f"   Latensi   : {_fmt_ms(b['latency_avg_ms'])} (P95 {_fmt_ms(b['latency_p95_ms'])})\n"
             f"   Packet loss : {b['loss_avg_pct']:.1f}%")
-    lines.append("\n_(via VPN) = diukur lewat jalur VPN, mencerminkan kesehatan VPN, "
-                 "bukan mutu ISP di lokasi itu._"
-                 if any(b.get("vpn_measured") for b in rows) else "")
+    notes = []
+    if any(b.get("vpn_measured") for b in rows):
+        notes.append("_(via VPN) = diukur lewat jalur VPN, mencerminkan kesehatan VPN, "
+                     "bukan mutu ISP di lokasi itu._")
+    # Saat sebuah link mati, ping ke router di belakangnya juga gagal, jadi
+    # downtime ikut terhitung sebagai packet loss. Tanpa catatan ini, satu
+    # gangguan terbaca dua kali: sebagai outage DAN sebagai "kualitas buruk".
+    if not data.get("coverage_ok") or (data.get("isp_incidents") or []):
+        notes.append("_Catatan: jam saat internet/VPN mati ikut terhitung sebagai packet "
+                     "loss di tabel ini, jadi angka loss pada lokasi yang sempat mati "
+                     "bukan cerminan mutu link saat normal._")
+    if notes:
+        lines.append("\n" + "\n".join(notes))
     return "\n".join(l for l in lines if l is not None)
 
 
@@ -587,36 +719,64 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
     du = data.get("isp_uptime_pct")
     pu = data.get("prev_isp_uptime_pct")
     delta = None if (du is None or pu is None) else round(du - pu, 3)
-    uptime = "-" if du is None else f"{du}%"
+    uptime = _fmt_pct(du)
     if delta is not None:
         arrow = "🔺" if delta > 0 else ("🔻" if delta < 0 else "➖")
-        uptime += f" ({arrow} {delta:+.2f} poin vs periode lalu)"
+        uptime += f" ({arrow} {delta:+.1f} poin vs periode lalu)"
     isp = data.get("isp_incidents") or []
+    n_links = len(data.get("isp_links") or [])
     head = (
         f"📊 *{title.upper()}*\n"
         f"🗓️ _{data['period_label']}_\n"
         "━━━━━━━━━━━━━━\n"
-        f"📈 Uptime internet  : *{uptime}*\n"
-        f"🌐 Internet mati    : *{len(isp)}x*"
+    )
+    # Peringatan cakupan dipasang DI ATAS angka, supaya tidak terbaca sebagai
+    # hasil pemantauan penuh.
+    if not data.get("coverage_ok") and data.get("coverage_pct") is not None:
+        cov = data["coverage"]
+        head += (
+            f"⚠️ *Data belum lengkap*\n"
+            f"_Pemantauan hanya aktif {data['coverage_pct']:.1f}% periode ini "
+            f"({cov['blackout_count']}x jeda, {cov['blackout_seconds']/3600:.0f} jam mati). "
+            f"Angka di bawah adalah batas bawah — gangguan saat pemantauan mati "
+            f"tidak tercatat._\n"
+            "━━━━━━━━━━━━━━\n"
+        )
+    head += (
+        f"📈 Uptime internet  : *{uptime}*"
+        + (f" _({n_links} link terpantau)_" if n_links else "")
+        + f"\n🌐 Internet mati    : *{len(isp)}x*"
         + (f" (total {data['isp_downtime_human']})" if isp else "")
     )
+    other = data.get("other_device_incidents") or 0
+    if other:
+        head += f"\n🔧 Perangkat lain    : *{other}x* _(switch/AP, bukan ISP)_"
     if data.get("clients_total") is not None:
-        head += f"\n👥 Klien aktif      : *{data['clients_total']}*"
+        head += f"\n👥 Klien aktif      : *{data['clients_total']}* _(saat laporan dibuat)_"
     links = data.get("isp_links") or []
     if links:
         head += "\n\n🌐 *Uptime per Link ISP*"
         for l in links:
             ic = "🟢" if (l["uptime_pct"] or 0) >= 99.9 else ("🟠" if (l["uptime_pct"] or 0) >= 99 else "🔴")
-            head += f"\n{ic} {l['name']}: {l['uptime_pct']}%"
+            head += f"\n{ic} {l['name']}: {_fmt_pct(l['uptime_pct'])}"
     if isp:
         head += "\n\n🔴 *Detail Internet Mati*"
         for i in isp[:10]:
-            up = i["up_at"][5:16] if i["up_at"] else "masih mati"
-            head += f"\n• {i['name']}: {i['down_at'][5:16]} ➜ {up} ({_fmt_dur(i['duration_seconds'])})"
+            up = _fmt_dt_id(i["up_at"]) if i["up_at"] else "masih mati"
+            head += (f"\n• {i['name']}: {_fmt_dt_id(i['down_at'])} ➜ {up} "
+                     f"({_fmt_dur(i['duration_seconds'])})")
         if len(isp) > 10:
             head += f"\n• _... +{len(isp) - 10} lagi (lihat PDF)_"
     else:
         head += "\n\n✅ *Internet mati:* tidak ada"
+    flap = data.get("flapping_devices") or []
+    if flap:
+        head += "\n\n🔁 *Perangkat Sering Putus-Nyambung*"
+        for x in flap[:5]:
+            head += (f"\n• {x['label']}: {x['incidents']}x "
+                     f"(total {_fmt_dur(x['downtime_seconds'])})")
+        if len(flap) > 5:
+            head += f"\n• _... +{len(flap) - 5} lagi (lihat PDF)_"
     bw = _wa_bandwidth_block(data)
     if bw:
         head += "\n\n" + bw

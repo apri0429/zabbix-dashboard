@@ -275,6 +275,66 @@ def get_blackouts(days: int = 7) -> List[Dict]:
              "seconds": r["seconds"]} for r in rows]
 
 
+def get_blackouts_range(start_dt: datetime.datetime,
+                        end_dt: datetime.datetime) -> List[Dict]:
+    """Blackout pemantauan yang menyentuh window [start_dt, end_dt), masing-masing
+    sudah dipotong di batas window. `seconds` = lama blackout DI DALAM window."""
+    init_db()
+    lo = start_dt.strftime(_FMT)
+    hi = end_dt.strftime(_FMT)
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT started_at, ended_at, seconds FROM noc_blackouts "
+            "WHERE started_at < ? AND ended_at >= ? ORDER BY started_at ASC",
+            (hi, lo),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out = []
+    for r in rows:
+        s = max(datetime.datetime.strptime(r["started_at"], _FMT), start_dt)
+        e = min(datetime.datetime.strptime(r["ended_at"], _FMT), end_dt)
+        sec = (e - s).total_seconds()
+        if sec <= 0:
+            continue
+        out.append({
+            "started_at": s.strftime(_FMT),
+            "ended_at": e.strftime(_FMT),
+            "seconds": int(sec),
+            "full_started_at": r["started_at"],
+            "full_ended_at": r["ended_at"],
+        })
+    return out
+
+
+def get_coverage(start_dt: datetime.datetime, end_dt: datetime.datetime) -> Dict:
+    """Seberapa banyak window [start_dt, end_dt) benar-benar terpantau.
+
+    Dipakai laporan supaya uptime / jumlah insiden tidak disajikan seolah hasil
+    pemantauan penuh padahal backend sempat mati. Insiden yang mulai DAN selesai
+    di dalam blackout hilang permanen, jadi angka insiden pada periode dengan
+    cakupan rendah hanya batas bawah."""
+    now_dt = datetime.datetime.now()
+    win_end = min(end_dt, now_dt)
+    window_seconds = max(0.0, (win_end - start_dt).total_seconds())
+    blackouts = get_blackouts_range(start_dt, win_end) if window_seconds else []
+    # Blackout tidak saling tumpang-tindih (dicatat berurutan), jadi boleh dijumlah.
+    blackout_seconds = sum(b["seconds"] for b in blackouts)
+    blackout_seconds = min(blackout_seconds, window_seconds)
+    monitored = max(0.0, window_seconds - blackout_seconds)
+    pct = round(100.0 * monitored / window_seconds, 1) if window_seconds else None
+    return {
+        "window_seconds": int(window_seconds),
+        "monitored_seconds": int(monitored),
+        "blackout_seconds": int(blackout_seconds),
+        "coverage_pct": pct,
+        "blackouts": blackouts,
+        "blackout_count": len(blackouts),
+    }
+
+
 def record_snapshot(entities: List[Dict]):
     """Bandingkan status tiap entity sekarang dengan event terbuka terakhirnya.
     entities: [{"kind": "site"|"device", "key": str, "name": str, "state": str}, ...]
@@ -394,6 +454,11 @@ def get_trend(minutes: int = 120, max_points: int = 120) -> Dict[str, List[Dict]
 # sejauh ini, karena kita belum tahu itu bakal jadi insiden panjang atau bukan.
 MIN_INCIDENT_SECONDS = 60
 
+# Ambang khusus LAPORAN (PDF & rekap WA): mati di bawah 10 menit tidak dihitung
+# sebagai insiden, supaya angka laporan mencerminkan gangguan yang benar-benar
+# berarti. Dashboard & Log Insiden tetap pakai MIN_INCIDENT_SECONDS.
+REPORT_MIN_INCIDENT_SECONDS = 600
+
 # Dua kejadian DOWN berurutan milik entity yang sama, kalau jeda UP di antaranya
 # lebih pendek dari ini, dianggap satu insiden yang sama yang cuma sempat "kedip"
 # nyala sebentar (mis. balas 1 ping pas baru boot) — digabung jadi satu supaya
@@ -450,11 +515,12 @@ def _drop_short_incidents(rows: List[Dict], min_seconds: int = MIN_INCIDENT_SECO
     return out
 
 
-def _clean_incident_rows(rows: List[sqlite3.Row]) -> List[Dict]:
+def _clean_incident_rows(rows: List[sqlite3.Row],
+                         min_seconds: int = MIN_INCIDENT_SECONDS) -> List[Dict]:
     """Pipeline standar buat log/statistik: gabung kedipan lalu buang yang masih
     terlalu pendek. Dipakai di semua fungsi baca supaya Log Insiden & statistik
     konsisten — sesaat/noise tidak ikut dihitung, insiden nyata tidak terpotong."""
-    return _drop_short_incidents(_merge_flaps(rows))
+    return _drop_short_incidents(_merge_flaps(rows), min_seconds)
 
 
 def get_uptime_stats(kind: Optional[str] = None, days: int = 7) -> List[Dict]:
@@ -465,7 +531,8 @@ def get_uptime_stats(kind: Optional[str] = None, days: int = 7) -> List[Dict]:
 
 
 def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetime,
-                           kind: Optional[str] = None) -> List[Dict]:
+                           kind: Optional[str] = None,
+                           min_seconds: int = MIN_INCIDENT_SECONDS) -> List[Dict]:
     """Sama seperti get_uptime_stats tapi window-nya eksplisit [start_dt, end_dt).
     Insiden yang melewati batas window dipotong di batas itu. `end_dt` di masa
     depan otomatis di-clamp ke sekarang untuk insiden yang masih berlangsung."""
@@ -496,7 +563,7 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         rows = conn.execute(q, params).fetchall()
     finally:
         conn.close()
-    rows = _clean_incident_rows(rows)
+    rows = _clean_incident_rows(rows, min_seconds)
 
     agg: Dict[str, Dict] = {}
     for r in rows:
@@ -542,7 +609,8 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
 
 
 def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetime,
-                           kind: Optional[str] = None, limit: int = 2000) -> List[Dict]:
+                           kind: Optional[str] = None, limit: int = 2000,
+                           min_seconds: int = MIN_INCIDENT_SECONDS) -> List[Dict]:
     """Kejadian DOWN yang menyentuh window [start_dt, end_dt)."""
     init_db()
     now_dt = datetime.datetime.now()
@@ -564,7 +632,7 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         rows = conn.execute(q, params).fetchall()
     finally:
         conn.close()
-    rows = _clean_incident_rows(rows)
+    rows = _clean_incident_rows(rows, min_seconds)
 
     out = []
     for r in rows:

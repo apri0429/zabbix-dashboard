@@ -233,7 +233,10 @@ def _auto_send_daily_report():
             logging.warning("Scheduled report: no Zabbix data available — email not sent")
             return
         regenerate_report_assets(summary, start_dt, end_dt)
-        dhcp_rows = make_pdf(summary, start_dt, end_dt, REPORT_PATH)
+        dhcp_rows = make_pdf(summary, start_dt, end_dt, REPORT_PATH,
+                             isp_incidents=report_isp_incidents(start_dt, end_dt),
+                             coverage=report_coverage(start_dt, end_dt),
+                             report_title="Laporan Harian")
         send_email(summary, start_dt, end_dt, REPORT_PATH, dhcp_rows=dhcp_rows)
         logging.info("Scheduled report: email sent to %s", TO_EMAIL)
     except Exception:
@@ -284,6 +287,13 @@ def _start_scheduler():
             else:
                 logging.warning("NOC history: status live belum tersedia saat startup — event lama ditutup di titik terakhir")
                 noc_history.close_stale_open_events(close_at=gap["started_at"])
+            # Selama blackout tidak ada satu pun alert terkirim, jadi tanpa
+            # pemberitahuan ini diamnya sistem tidak bisa dibedakan dari "aman".
+            if gap["seconds"] >= NOC_BLACKOUT_NOTIFY_MIN_SECONDS:
+                try:
+                    _send_whatsapp_message(_format_blackout_notice(gap))
+                except Exception:
+                    logging.exception("NOC history: kirim notifikasi blackout gagal")
         else:
             noc_history.close_stale_open_events()
     except Exception:
@@ -851,6 +861,16 @@ def _parse_busy_hours(raw: str) -> Optional[Tuple[int, int]]:
 BANDWIDTH_BUSY_HOURS = _parse_busy_hours(os.getenv("BANDWIDTH_BUSY_HOURS", "07-17"))
 
 
+def busy_hours_label() -> str:
+    """Label jam kerja untuk dicantumkan di laporan. Semua angka bandwidth
+    difilter ke jendela ini (lihat get_stats_from_itemid), jadi laporan WAJIB
+    menyebutnya — kalau tidak, pembaca mengira angkanya rata-rata 24 jam."""
+    if not BANDWIDTH_BUSY_HOURS:
+        return "24 jam"
+    lo, hi = BANDWIDTH_BUSY_HOURS
+    return f"{lo:02d}:00-{hi:02d}:00"
+
+
 def get_stats_from_itemid(itemid: str, capacity_mbps: float, start_ts: int, end_ts: int) -> Dict[str, float]:
     hist = get_item_history(itemid, start_ts, end_ts)
     if BANDWIDTH_BUSY_HOURS:
@@ -1412,9 +1432,74 @@ def match_dhcp_active(label: str, dhcp_rows: List[Dict]):
     return best_val
 
 
+# Nama Netwatch pakai merek langganan ("Indibiz"), label summary pakai nama produk
+# ("INDIHOME"). Dipetakan supaya insiden ISP bisa dicocokkan ke link yang benar.
+_ISP_BRAND_ALIAS = {
+    "indibiz": "indihome",
+    "indihome": "indihome",
+    "biznet": "biznet",
+}
+
+
+def _isp_brand(text: str) -> Optional[str]:
+    low = (text or "").lower()
+    for k, v in _ISP_BRAND_ALIAS.items():
+        if k in low:
+            return v
+    return None
+
+
+def _loc_key(text: str) -> str:
+    """Nama lokasi tanpa spasi/tanda baca, huruf kecil. Komentar Netwatch tidak
+    selalu memakai spasi yang sama dengan label Zabbix ('Rawabokor' vs
+    'Rawa Bokor'), jadi pencocokan per-kata gagal; dibandingkan sebagai satu
+    rangkaian huruf supaya keduanya tetap ketemu."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def match_isp_incidents(label: str, isp_incidents: Optional[List[Dict]]) -> List[Dict]:
+    """Insiden ISP yang menyangkut link `label`, dicocokkan dari lokasi + merek.
+
+    Dipakai supaya 'Analisa Per Lokasi' tidak lagi menyimpulkan 'Pemakaian normal'
+    untuk link yang pada periode yang sama tercatat mati berhari-hari di halaman
+    depan laporan."""
+    if not isp_incidents:
+        return []
+    loc = _loc_key(label.replace("Mikrotik", "").split(" - ")[0])
+    if len(loc) < 4:
+        return []
+    brand = _isp_brand(label)
+    out = []
+    for inc in isp_incidents:
+        nm = inc.get("name") or ""
+        if loc not in _loc_key(nm):
+            continue
+        b = _isp_brand(nm)
+        if brand and b and b != brand:
+            continue
+        out.append(inc)
+    return out
+
+
 # Ambang kepadatan user = kapasitas link (Mbps) dibagi jumlah user aktif
 USER_DENSITY_PADAT  = 2.0   # < 2 Mbps tersedia per user  -> PADAT
 USER_DENSITY_SEDANG = 5.0   # 2-5 Mbps per user           -> SEDANG,  >= 5 -> LONGGAR
+
+
+def router_total_capacity(label: str) -> float:
+    """Total kapasitas SEMUA link ISP pada router yang sama dengan `label`.
+
+    User aktif dihitung per router (satu DHCP pool), sedangkan kapasitas ada per
+    link. Membandingkan user router terhadap satu link saja membuat kepadatan
+    tampak dua kali lebih buruk dari kenyataan: Duta Garden 220 user pernah
+    dinilai PADAT dua kali, sekali terhadap 100 Mbps dan sekali terhadap
+    150 Mbps, padahal user yang sama dilayani 250 Mbps gabungan."""
+    host = (ITEM_MAP.get(label) or {}).get("host")
+    if not host:
+        return float(CAPACITY.get(label) or 0)
+    total = sum(float(CAPACITY.get(lbl) or 0)
+                for lbl, cfg in ITEM_MAP.items() if cfg.get("host") == host)
+    return total or float(CAPACITY.get(label) or 0)
 
 
 def classify_user_density(cap: float, users: int):
@@ -1611,6 +1696,36 @@ class PDF(FPDF):
         self.set_left_margin(saved)
         self.ln(2.0)
 
+    # ── helper: kotak peringatan (keterbatasan data) ──
+    def warning_box(self, title: str, text: str):
+        """Kotak merah muda untuk caveat yang TIDAK boleh terlewat pembaca,
+        mis. periode yang tidak terpantau penuh."""
+        if self.get_y() + 20 > self.page_break_trigger:
+            self.add_page()
+        x0, y0 = self.l_margin, self.get_y()
+        self.set_font("Helvetica", "B", 8.2)
+        self.set_text_color(160, 20, 20)
+        th = 5.0
+        self.set_font("Helvetica", "", 7.6)
+        body_h = len(self.multi_cell(182, 4.3, text, align="L", dry_run=True,
+                                     output="LINES")) * 4.3
+        h = th + body_h + 4.6
+        self.set_fill_color(253, 238, 238)
+        self.set_draw_color(214, 120, 120)
+        self.set_line_width(0.3)
+        self.rect(x0, y0, 190, h, style="DF", round_corners=True, corner_radius=1.8)
+        self.set_xy(x0 + 4, y0 + 2.0)
+        self.set_font("Helvetica", "B", 8.2)
+        self.set_text_color(160, 20, 20)
+        self.cell(182, th, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_xy(x0 + 4, y0 + 2.0 + th)
+        self.set_font("Helvetica", "", 7.6)
+        self.set_text_color(90, 40, 40)
+        self.multi_cell(182, 4.3, text, align="L")
+        self.set_xy(x0, y0 + h + 2.5)
+        self.set_text_color(*_C_BODY)
+        self.set_line_width(0.2)
+
     # ── helper: strip kotak statistik ringkas ──
     def stat_strip(self, items):
         x0, y = self.l_margin, self.get_y()
@@ -1635,9 +1750,37 @@ class PDF(FPDF):
         self.set_xy(x0, y + h + 2)
 
 
+def report_isp_incidents(start_dt: datetime.datetime,
+                         end_dt: datetime.datetime) -> List[Dict]:
+    """Kejadian ISP mati pada window, untuk bagian 'Log ISP Mati' di PDF.
+
+    Sebelumnya hanya laporan periodik yang mengisi ini, sehingga laporan HARIAN
+    tidak pernah menyebut internet pernah mati sama sekali."""
+    try:
+        rows = noc_history.get_downtime_log_range(
+            start_dt, end_dt, kind="device",
+            min_seconds=noc_history.REPORT_MIN_INCIDENT_SECONDS)
+    except Exception:
+        logging.exception("Laporan: gagal baca log ISP mati")
+        return []
+    out = [i for i in rows if "isp" in (i.get("name") or "").lower()]
+    out.sort(key=lambda i: i.get("down_at") or "")
+    return out
+
+
+def report_coverage(start_dt: datetime.datetime,
+                    end_dt: datetime.datetime) -> Optional[Dict]:
+    try:
+        return noc_history.get_coverage(start_dt, end_dt)
+    except Exception:
+        logging.exception("Laporan: gagal hitung cakupan pemantauan")
+        return None
+
+
 def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.datetime,
              output_path: str = REPORT_PATH, ai_summary: Optional[str] = None,
-             isp_incidents: Optional[List[Dict]] = None):
+             isp_incidents: Optional[List[Dict]] = None,
+             coverage: Optional[Dict] = None, report_title: Optional[str] = None):
     pdf = PDF()
     # Leave room for the PNM letterhead (top) and decorative footer (bottom)
     pdf.set_top_margin(PNM_HEADER_H + 9)
@@ -1648,18 +1791,51 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
     pdf.report_title()
 
     # ── Period badge ──────────────────────────
+    if report_title:
+        pdf.set_font("Helvetica", "B", 9.5)
+        pdf.set_text_color(*_C_NAVY)
+        pdf.cell(0, 5.4, report_title, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     periode = f"Periode:  {start_dt.strftime('%d-%m-%Y %H:%M')}  -  {end_dt.strftime('%d-%m-%Y %H:%M')}"
     pdf.set_font("Helvetica", "I", 9)
     pdf.set_text_color(*_C_MUTED)
     pdf.cell(0, 6, periode, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    # Semua angka bandwidth difilter ke jam kerja — dulu tidak disebut sama sekali,
+    # sehingga tabel terbaca seolah rata-rata 24 jam.
+    if BANDWIDTH_BUSY_HOURS:
+        pdf.set_font("Helvetica", "I", 7.8)
+        pdf.cell(0, 4.4, f"Angka bandwidth dihitung hanya dari jam kerja {busy_hours_label()}",
+                 align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(4)
+
+    # ── Peringatan cakupan pemantauan ──
+    # Tanpa ini, periode yang hampir seluruhnya tidak terpolling tetap tampil
+    # sebagai "uptime 93%, 1 kejadian" dan terbaca seperti hasil pemantauan penuh.
+    if coverage and coverage.get("coverage_pct") is not None \
+            and coverage["coverage_pct"] < noc_report.COVERAGE_OK_PCT:
+        _jam = coverage["blackout_seconds"] / 3600.0
+        pdf.warning_box(
+            "KETERBATASAN DATA - PERIODE INI TIDAK TERPANTAU PENUH",
+            f"Sistem pemantauan hanya aktif {coverage['coverage_pct']:.1f}% dari periode ini "
+            f"({coverage['blackout_count']}x jeda, total {_jam:.1f} jam tidak terpantau). "
+            "Angka uptime, jumlah kejadian, dan total downtime pada laporan ini adalah "
+            "BATAS BAWAH: gangguan yang mulai dan selesai pada saat pemantauan mati tidak "
+            "tercatat sama sekali. Jangan membaca sedikitnya jumlah kejadian sebagai "
+            "bukti jaringan aman, dan jangan membandingkannya dengan periode lain yang "
+            "cakupan pemantauannya berbeda.")
 
     # ── Ringkasan eksekutif (satu paragraf, tanpa card) ──
     _sc = build_status_count(summary)
     # Data user aktif DHCP (dipakai di ringkasan, analisa per lokasi, analisa global, tabel DHCP)
     dhcp_rows = build_dhcp_active_summary()
-    _lat_vals = [r["latency_avg_ms"] for r in summary if r.get("latency_sample", 0)]
-    _avg_latency = round(statistics.mean(_lat_vals), 1) if _lat_vals else 0.0
+    # Latency lokal (~1 ms) dan latency lewat VPN (~16 ms) mengukur jalur yang
+    # berbeda; dirata-ratakan jadi satu KPI, angkanya tidak mewakili apa pun.
+    # KPI dipisah: hanya link yang diukur LOKAL, dan jumlah link via VPN disebut.
+    _lat_local = [r["latency_avg_ms"] for r in summary
+                  if r.get("latency_sample", 0) and not r.get("vpn_measured")]
+    _lat_vpn = [r["latency_avg_ms"] for r in summary
+                if r.get("latency_sample", 0) and r.get("vpn_measured")]
+    _avg_lat_local = round(statistics.mean(_lat_local), 1) if _lat_local else None
+    _avg_lat_vpn = round(statistics.mean(_lat_vpn), 1) if _lat_vpn else None
     _lat_pool = [r for r in summary if not r.get("is_standby")] or summary
     _worst = max(_lat_pool, key=lambda r: r.get("latency_p95_ms", 0.0)) if _lat_pool else None
     _worst_txt = (
@@ -1678,15 +1854,22 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         ("Stabil",      _sc.get("STABIL", 0)),
         ("Padat",       _sc.get("PADAT", 0)),
         ("Tinggi",      _sc.get("TINGGI", 0)),
-        ("Avg Latency", f"{_avg_latency:.0f} ms"),
+        ("Latency Lokal", "-" if _avg_lat_local is None else f"{_avg_lat_local:.0f} ms"),
     ]
+    if _avg_lat_vpn is not None:
+        _strip.append(("Latency via VPN", f"{_avg_lat_vpn:.0f} ms"))
     if dhcp_rows:
         _strip.append(("User Aktif", sum(d["active"] for d in dhcp_rows)))
     pdf.stat_strip(_strip)
     pdf.ln(1)
     pdf.set_font("Helvetica", "I", 7.2)
     pdf.set_text_color(*_C_MUTED)
-    pdf.multi_cell(0, 4, f"P95 latency tertinggi: {_worst_txt}.")
+    pdf.multi_cell(0, 4,
+        f"P95 latency tertinggi: {_worst_txt}. "
+        "Latency Lokal = link yang di-ping langsung dari server Zabbix di Duta Garden; "
+        "Latency via VPN = link yang di-ping menembus tunnel, mencerminkan kesehatan VPN "
+        "dan bukan mutu ISP di lokasi tersebut. Keduanya tidak dirata-ratakan "
+        "bersama karena mengukur jalur yang berbeda.")
     pdf.ln(2)
 
     # ── Ringkasan AI (opsional; dipakai di laporan mingguan) ──
@@ -1732,7 +1915,7 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.set_text_color(*_C_MUTED)
         pdf.multi_cell(0, 4.2,
             "Daftar kejadian internet/ISP mati berdasarkan pemantauan Netwatch MikroTik "
-            "pada periode ini. Kedipan di bawah 1 menit tidak dicatat sebagai kejadian.", align="L")
+            "pada periode ini. Gangguan di bawah 10 menit tidak dicatat sebagai kejadian.", align="L")
         pdf.ln(2)
         if not isp_incidents:
             pdf.set_font("Helvetica", "B", 8.5)
@@ -1794,7 +1977,10 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                "walau latency & packet loss-nya bagus.")
     pdf.bullet("Pengaman Kualitas",
                "Sebaliknya, jika kualitas jalur ukur BURUK, status minimal dinaikkan ke "
-               "PADAT walau utilisasi rendah - sebagai penanda perlu investigasi.")
+               "PADAT walau utilisasi rendah - sebagai penanda perlu investigasi. "
+               "PENGECUALIAN: aturan ini tidak berlaku untuk link yang diukur lewat VPN "
+               "(lihat butir berikut), karena yang buruk bisa jadi tunnel-nya, bukan link "
+               "ISP-nya. Itu sebabnya ada link berkualitas BURUK yang statusnya tetap STABIL.")
     pdf.bullet("Koreksi Link via VPN",
                "Server Zabbix ada di Duta Garden. Site lain di-ping menembus VPN "
                "(uplink KS Tubun / Jatake), jadi latency & packet loss-nya mengukur VPN, "
@@ -1817,7 +2003,10 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                "Nilai MAX absolut selama periode - gambaran puncak sesaat. Ikut dihitung "
                "dalam Weighted Score dengan bobot kecil (15% dari komponen utilisasi).")
     pdf.bullet("Kepadatan User (DHCP)",
-               "Indikator terpisah dari Weighted Score: kapasitas link dibagi jumlah user aktif. "
+               "Indikator terpisah dari Weighted Score: TOTAL kapasitas seluruh link ISP pada "
+               "router tersebut dibagi jumlah user aktif router itu. Dipakai total, bukan "
+               "kapasitas satu link, karena user yang sama dilayani semua link router secara "
+               "bersama-sama. "
                "LONGGAR di atas 5 Mbps/user; SEDANG 2-5; PADAT di bawah 2. "
                "Dipakai menajamkan rekomendasi (upgrade vs QoS), bukan menentukan status trafik.")
     pdf.bullet("Latency & Packet Loss",
@@ -1853,12 +2042,19 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
             txt = f"{val} {unit}".strip() if unit else str(val)
             pdf.cell(w, ROW_H, txt, border=1, align="R", fill=fill_bg)
 
+        # Puncak melebihi kapasitas langganan = mustahil; ditandai "(!)" supaya
+        # tidak dibaca sebagai lonjakan nyata (lihat catatan di bawah tabel).
+        _cap = r.get("capacity") or 0
+        def _peak_txt(v):
+            v = v or 0
+            return f"{v} Mbps(!)" if _cap and v > _cap * 1.001 else f"{v} Mbps"
+
         pdf.cell(COL_W[0], ROW_H, r["label"],                    border=1, align="L", fill=fill_bg)
         num_cell(COL_W[1], r["capacity"],    "Mbps")
         num_cell(COL_W[2], r["avg_download"],"Mbps")
         num_cell(COL_W[3], r["avg_upload"],  "Mbps")
-        num_cell(COL_W[4], r["peak_download"],"Mbps")
-        num_cell(COL_W[5], r["peak_upload"], "Mbps")
+        pdf.cell(COL_W[4], ROW_H, _peak_txt(r["peak_download"]), border=1, align="R", fill=fill_bg)
+        pdf.cell(COL_W[5], ROW_H, _peak_txt(r["peak_upload"]), border=1, align="R", fill=fill_bg)
         pdf.cell(COL_W[6], ROW_H, f"{r['weighted_score']}%",    border=1, align="C", fill=fill_bg)
 
         # Status badge — rounded pill (dashboard style)
@@ -1873,10 +2069,15 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
     pdf.set_text_color(*_C_MUTED)
     pdf.multi_cell(0, 4,
         "Catatan: kolom Peak = nilai MAX absolut (puncak sesaat). "
-        "Weighted Score menggabungkan utilisasi (Avg + P95 + Peak, bobot 80%) dan kualitas "
+        + (f"Semua angka dihitung hanya dari jam kerja {busy_hours_label()}, bukan rata-rata 24 jam. "
+           if BANDWIDTH_BUSY_HOURS else "")
+        + "Weighted Score menggabungkan utilisasi (Avg + P95 + Peak, bobot 80%) dan kualitas "
         "jalur ukur (latency + packet loss, bobot 20%). Status juga bisa naik dari utilisasi "
         "murni bila link nyaris penuh - lihat 'Cara Menilai' di halaman awal. "
-        "Alasan status tiap link dijelaskan di bagian 'Analisa Per Lokasi'.")
+        "Alasan status tiap link dijelaskan di bagian 'Analisa Per Lokasi'. "
+        "Tanda (!) pada Peak = nilai tercatat melebihi kapasitas langganan; itu mustahil "
+        "secara fisik, jadi kemungkinan salah ukur (artefak counter) atau kapasitas yang "
+        "terisi keliru - perlu diverifikasi, jangan dibaca sebagai lonjakan nyata.")
     pdf.ln(4)
 
     # ── Connection quality table (latency & packet loss) ──
@@ -1885,8 +2086,12 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.add_page()
     pdf.section_title("Kualitas Koneksi  -  Latency & Packet Loss")
 
+    # "Loss Max" dihapus: satu siklus ping yang gagal langsung membuatnya 100%,
+    # jadi kolom itu selalu 100% di semua baris dan hanya membuat semua tampak
+    # rusak - padahal penilaian memang memakai Loss Avg. Diganti jumlah sampel,
+    # yang justru memberi tahu pembaca seberapa kuat dasar angka di baris itu.
     Q_W    = [52, 24, 24, 24, 21, 21, 24]   # sum = 190
-    Q_HEAD = ["Host / ISP", "Lat Avg", "Lat P95", "Lat Max", "Loss Avg", "Loss Max", "Kualitas"]
+    Q_HEAD = ["Host / ISP", "Lat Avg", "Lat P95", "Lat Max", "Loss Avg", "Sampel", "Kualitas"]
 
     pdf.table_header(Q_W, Q_HEAD, HEAD_H)
 
@@ -1900,7 +2105,9 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         lat_p95 = f"{r['latency_p95_ms']:.1f} ms" if has_lat else "-"
         lat_max = f"{r['latency_max_ms']:.1f} ms" if has_lat else "-"
         loss_avg = f"{r['loss_avg_pct']:.1f}%" if has_lat else "-"
-        loss_max = f"{r['loss_max_pct']:.1f}%" if has_lat else "-"
+        # Tanpa pemisah ribuan: di dokumen ini titik sudah dipakai sebagai koma
+        # desimal ("23.04 Mbps"), jadi "7.241" akan terbaca sebagai 7 koma 241.
+        n_sample = f"{r.get('latency_sample', 0)}" if has_lat else "-"
 
         q_label = r["label"] + ("  (via VPN)" if r.get("vpn_measured") else "")
         pdf.cell(Q_W[0], ROW_H, q_label, border=1, align="L", fill=fill_bg)
@@ -1908,7 +2115,7 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.cell(Q_W[2], ROW_H, lat_p95, border=1, align="R", fill=fill_bg)
         pdf.cell(Q_W[3], ROW_H, lat_max, border=1, align="R", fill=fill_bg)
         pdf.cell(Q_W[4], ROW_H, loss_avg, border=1, align="R", fill=fill_bg)
-        pdf.cell(Q_W[5], ROW_H, loss_max, border=1, align="R", fill=fill_bg)
+        pdf.cell(Q_W[5], ROW_H, n_sample, border=1, align="R", fill=fill_bg)
 
         q = r.get("conn_quality", "-")
         qx, qy = pdf.get_x(), pdf.get_y()
@@ -1922,12 +2129,17 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
     pdf.set_text_color(*_C_MUTED)
     pdf.multi_cell(0, 4,
         "Kualitas: BAIK (P95 < 80 ms & loss < 0,5%)   CUKUP (P95 80-150 ms atau loss 0,5-2%)   "
-        "BURUK (P95 >= 150 ms atau loss >= 2%).  Loss dihitung dari rata-rata periode, bukan nilai max. "
-        "Tanda '-' = item ICMP ping tidak tersedia di Zabbix.  "
+        "BURUK (P95 >= 150 ms atau loss >= 2%).  Loss dihitung dari rata-rata periode. "
+        "Kolom Sampel = jumlah hasil ping yang mendasari baris itu; makin kecil, makin lemah "
+        "dasar kesimpulannya.  Tanda '-' = item ICMP ping tidak tersedia di Zabbix.  "
         "Server Zabbix berada di Duta Garden. Baris bertanda (via VPN) di-ping menembus tunnel VPN "
         "(uplink utama KS Tubun, cadangan Jatake), sehingga angkanya menggambarkan kesehatan VPN - "
         "bukan link ISP site tsb. Untuk baris ini bobot komponen kualitas dikecilkan 50% dan "
-        "tidak dipakai menaikkan status.")
+        "tidak dipakai menaikkan status.  PENTING: selama sebuah link ISP atau tunnel MATI, ping "
+        "ke router di belakangnya ikut gagal dan terhitung sebagai packet loss di tabel ini. "
+        "Jadi pada lokasi yang sempat mati (lihat 'Log ISP Mati'), angka loss di sini sebagian "
+        "berasal dari downtime tersebut - bukan cerminan mutu jalur saat kondisi normal, dan "
+        "gangguan yang sama sudah dihitung sebagai kejadian terpisah di log.")
     pdf.ln(4)
 
     # ── Global analysis ───────────────────────
@@ -2126,7 +2338,10 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
             pdf.cell(0, 5, f"User aktif (DHCP): {users} user",
                      new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-            dens = classify_user_density(capacity, users)
+            # Pembanding = total kapasitas semua link di router ini, karena user
+            # DHCP dihitung per router dan dilayani seluruh link bersama-sama.
+            _cap_router = router_total_capacity(label)
+            dens = classify_user_density(_cap_router, users)
             if dens:
                 d_lab, d_per = dens
                 d_col = {"PADAT": (176, 35, 24), "SEDANG": (138, 104, 15),
@@ -2137,11 +2352,14 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                     tip = "  ->  user padat walau trafik belum penuh; siapkan rencana kapasitas / QoS."
                 else:
                     tip = ""
+                _multi = _cap_router > (capacity or 0) + 0.001
+                _basis = (f" dari total {_cap_router:g} Mbps seluruh link router ini"
+                          if _multi else "")
                 pdf.set_x(15)
                 pdf.set_font("Helvetica", "B", 8)
                 pdf.set_text_color(*d_col)
                 pdf.multi_cell(180, 5,
-                    f"Kepadatan user: {d_lab}  (~{d_per:.1f} Mbps kapasitas per user){tip}",
+                    f"Kepadatan user: {d_lab}  (~{d_per:.1f} Mbps kapasitas per user{_basis}){tip}",
                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*_C_BODY)
@@ -2166,17 +2384,68 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         if r.get("latency_sample", 0):
             pdf.set_x(15)
             _via = " (via VPN - ukur kesehatan tunnel, bukan link ISP)" if r.get("vpn_measured") else ""
+            # Loss max tidak ditampilkan: satu siklus ping gagal sudah membuatnya
+            # 100%, jadi angkanya selalu 100% dan tidak membedakan apa pun.
             lat_text = (
                 f"Latency{_via}: rata-rata {r['latency_avg_ms']:.1f} ms, P95 {r['latency_p95_ms']:.1f} ms, "
-                f"max {r['latency_max_ms']:.1f} ms  |  Packet loss: rata-rata {r['loss_avg_pct']:.1f}%, "
-                f"max {r['loss_max_pct']:.1f}%  ->  Kualitas {r.get('conn_quality', '-')}."
+                f"max {r['latency_max_ms']:.1f} ms  |  Packet loss rata-rata {r['loss_avg_pct']:.1f}% "
+                f"({r.get('latency_sample', 0)} sampel)  ->  Kualitas {r.get('conn_quality', '-')}."
             )
             pdf.multi_cell(180, 5, lat_text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        # Keandalan link ini pada periode yang sama. Tanpa blok ini, bagian
+        # per-lokasi hanya menilai beban trafik, sehingga sebuah link bisa
+        # disimpulkan "pemakaian normal" padahal di halaman depan laporan
+        # tercatat mati berhari-hari.
+        _my_inc = match_isp_incidents(label, isp_incidents)
+        if _my_inc:
+            _dt = sum(i.get("duration_seconds") or 0 for i in _my_inc)
+            _ong = any(i.get("ongoing") for i in _my_inc)
+            pdf.set_x(15)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(176, 35, 24)
+            pdf.multi_cell(180, 5,
+                f"Keandalan: link ini MATI {len(_my_inc)}x pada periode ini, total "
+                f"{noc_report._fmt_dur(_dt)}"
+                + (" dan saat laporan dibuat masih mati." if _ong else ". ")
+                + " Lihat 'Log ISP Mati' untuk rinciannya. Status beban di atas hanya "
+                  "menilai pemakaian bandwidth saat link hidup, bukan keandalannya.",
+                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*_C_BODY)
+        elif isp_incidents is not None and _isp_brand(label):
+            pdf.set_x(15)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(24, 120, 110)
+            pdf.cell(0, 5, "Keandalan: tidak ada catatan ISP mati pada periode ini.",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(*_C_BODY)
+
+        # Trafik nol sepanjang periode bukan "pemakaian rendah yang normal" —
+        # lebih mungkin link/perangkatnya tidak aktif atau item Zabbix salah.
+        _pk = max(r.get("peak_download") or 0.0, r.get("peak_upload") or 0.0)
+        if _pk < min(1.0, (capacity or 1e9) * 0.01):
+            pdf.set_x(15)
+            pdf.set_font("Helvetica", "B", 7.8)
+            pdf.set_text_color(176, 35, 24)
+            pdf.multi_cell(180, 5,
+                "Perlu diperiksa: trafik link ini praktis NOL sepanjang periode. Untuk link "
+                "cadangan pemakaian rendah memang wajar, tetapi nol sama sekali lebih "
+                "menandakan link / perangkatnya tidak aktif atau item pengukuran di Zabbix "
+                "tidak lagi cocok - bukan kondisi sehat yang bisa diabaikan.",
+                new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*_C_BODY)
 
         pdf.set_x(15)
         pdf.set_font("Helvetica", "I", 7.5)
         pdf.set_text_color(*_C_MUTED)
-        pdf.cell(0, 5, f"Rekomendasi: {r['solusi']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        _sol = r["solusi"]
+        if _my_inc:
+            _sol = (_sol.rstrip(". ") +
+                    ". Prioritas utama lokasi ini adalah keandalan koneksi, bukan kapasitas: "
+                    "tindak lanjuti gangguan ISP di atas bersama penyedia layanan.")
+        pdf.multi_cell(180, 5, f"Rekomendasi: {_sol}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
     # ── Charts (lanjut di halaman berjalan kalau ruang cukup, tidak selalu ganti halaman) ──
@@ -3222,6 +3491,29 @@ def _send_whatsapp_message(message: str):
 WA_ALERT_MIN_DOWN_SECONDS = int(os.getenv("WA_ALERT_MIN_DOWN_SECONDS", "180"))
 _WA_PENDING_DOWN: Dict[str, Dict] = {}   # key -> {"change", "since", "notified"}
 
+# Pemberitahuan "pemantauan sempat mati" hanya dikirim kalau jedanya cukup lama,
+# supaya restart biasa / deploy tidak jadi spam. 0 = matikan pemberitahuan ini.
+NOC_BLACKOUT_NOTIFY_MIN_SECONDS = int(os.getenv("NOC_BLACKOUT_NOTIFY_MIN_SECONDS", "1800"))
+
+
+def _format_blackout_notice(gap: Dict) -> str:
+    """Pesan WA sesudah pemantauan hidup lagi. Penting karena selama jeda tidak
+    ada alert DOWN/UP yang terkirim — tanpa ini, periode tanpa alert terbaca
+    seperti periode tanpa gangguan."""
+    jam = (gap.get("seconds") or 0) / 3600.0
+    lama = f"{jam:.1f} jam" if jam >= 1 else f"{(gap.get('seconds') or 0) // 60} menit"
+    return "\n".join([
+        "⚠️ *NOC — PEMANTAUAN SEMPAT MATI*",
+        "━━━━━━━━━━━━━━",
+        f"🕐 Mulai  : {gap.get('started_at') or '-'}",
+        f"🔼 Pulih  : {gap.get('ended_at') or '-'}",
+        f"⏳ Lama   : *{lama}*",
+        "━━━━━━━━━━━━━━",
+        "_Selama rentang di atas tidak ada alert yang terkirim. Gangguan yang "
+        "mulai dan selesai pada rentang itu tidak tercatat, jadi tidak adanya "
+        "notifikasi bukan berarti jaringan aman._",
+    ])
+
 
 def _send_noc_alerts(transitions: List[Dict]):
     now = time.time()
@@ -3521,7 +3813,8 @@ def _generate_periodic_report(start_dt: datetime.datetime, end_dt: datetime.date
     narrative = noc_report.generate_narrative(data)
     pdf_path = os.path.join(BASE_OUTPUT_DIR, pdf_name)
     make_pdf(summary, start_dt, end_dt, pdf_path, ai_summary=narrative,
-             isp_incidents=data.get("isp_incidents", []))
+             isp_incidents=data.get("isp_incidents", []),
+             coverage=data.get("coverage"), report_title=title)
     return {
         "pdf_path": pdf_path, "pdf_name": pdf_name,
         "period_label": data["period_label"],
@@ -3805,7 +4098,9 @@ def api_export_pdf(
             raise HTTPException(status_code=404, detail="Tidak ada data untuk dibuat PDF")
 
         regenerate_report_assets(summary, start_dt, end_dt)
-        make_pdf(summary, start_dt, end_dt, REPORT_PATH)
+        make_pdf(summary, start_dt, end_dt, REPORT_PATH,
+                 isp_incidents=report_isp_incidents(start_dt, end_dt),
+                 coverage=report_coverage(start_dt, end_dt))
 
         # Unique filename per download so the browser never reuses an old cached file
         download_name = (
@@ -3907,7 +4202,9 @@ def api_send_email(
             raise HTTPException(status_code=404, detail="Tidak ada data untuk email")
 
         regenerate_report_assets(summary, start_dt, end_dt)
-        dhcp_rows = make_pdf(summary, start_dt, end_dt, REPORT_PATH)
+        dhcp_rows = make_pdf(summary, start_dt, end_dt, REPORT_PATH,
+                             isp_incidents=report_isp_incidents(start_dt, end_dt),
+                             coverage=report_coverage(start_dt, end_dt))
         send_email(summary, start_dt, end_dt, REPORT_PATH, dhcp_rows=dhcp_rows)
 
         return {
