@@ -351,7 +351,12 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     isp_dev.sort(key=lambda i: i["down_at"] or "")
     isp_incidents = [
         {"name": _short(i["name"]), "down_at": i["down_at"], "up_at": i["up_at"],
-         "duration_seconds": i["duration_seconds"], "ongoing": i["ongoing"]}
+         "duration_seconds": i["duration_seconds"], "ongoing": i["ongoing"],
+         # Bagian durasi yang jatuh saat pemantauan mati: durasi yang menelan
+         # blackout tidak boleh disajikan sebagai angka pasti.
+         "unmonitored_seconds": i.get("unmonitored_seconds", 0),
+         "observed_seconds": i.get("observed_seconds", i["duration_seconds"]),
+         "duration_certain": i.get("duration_certain", True)}
         for i in isp_dev
     ]
     isp_downtime = sum(i["duration_seconds"] for i in isp_dev)
@@ -532,9 +537,20 @@ def _narrative_prompt(data: Dict) -> str:
         lines.append(f"\nKejadian internet/ISP mati (sumber Netwatch; {len(isp)}x; jam mati -> jam pulih, durasi):")
         for i in isp[:40]:
             up = i["up_at"] or "masih mati"
-            lines.append(f"- {i['name']}: {i['down_at']} -> {up}, {_fmt_dur(i['duration_seconds'])}")
+            note = ""
+            if not i.get("duration_certain", True):
+                note = (f" [DURASI PERKIRAAN: hanya "
+                        f"{_fmt_dur(i.get('observed_seconds') or 0)} yang terpantau, "
+                        f"sisanya saat pemantauan mati]")
+            lines.append(f"- {i['name']}: {i['down_at']} -> {up}, "
+                         f"{_fmt_dur(i['duration_seconds'])}{note}")
         lines.append("(Sebutkan kejadian ISP mati di Poin Penting lengkap dengan "
                      "nama ISP/lokasi, tanggal & jam, dan durasinya.)")
+        if any(not i.get("duration_certain", True) for i in isp):
+            lines.append("PENTING: durasi bertanda DURASI PERKIRAAN jangan disebut sebagai "
+                         "angka pasti. Sebut sebagai perkiraan dan jelaskan singkat bahwa "
+                         "sebagian waktunya tidak terpantau, jadi bisa jadi sebenarnya "
+                         "lebih pendek.")
     else:
         lines.append("\nTidak ada kejadian ISP mati pada periode ini.")
 
@@ -765,8 +781,16 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
             up = _fmt_dt_id(i["up_at"]) if i["up_at"] else "masih mati"
             head += (f"\n• {i['name']}: {_fmt_dt_id(i['down_at'])} ➜ {up} "
                      f"({_fmt_dur(i['duration_seconds'])})")
+            # Durasi yang sebagian besar jatuh saat pemantauan mati tidak boleh
+            # dibaca sebagai lama mati yang terukur.
+            if not i.get("duration_certain", True):
+                head += (f"\n   ⚠️ _hanya {_fmt_dur(i.get('observed_seconds') or 0)} "
+                         f"yang terpantau; sisanya saat pemantauan mati_")
         if len(isp) > 10:
             head += f"\n• _... +{len(isp) - 10} lagi (lihat PDF)_"
+        if any(not i.get("duration_certain", True) for i in isp[:10]):
+            head += ("\n\n_Durasi bertanda ⚠️ dihitung dari jam yang dilaporkan router, "
+                     "bukan dari pemantauan langsung — anggap sebagai perkiraan._")
     else:
         head += "\n\n✅ *Internet mati:* tidak ada"
     flap = data.get("flapping_devices") or []

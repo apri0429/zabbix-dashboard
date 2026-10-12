@@ -1927,9 +1927,14 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
             pdf.set_text_color(*_C_NAVY)
             pdf.cell(0, 6, f"{len(isp_incidents)} kejadian  |  total mati {noc_report._fmt_dur(_tot)}",
                      new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            _CW = [20, 56, 38, 38, 20, 18]   # sum = 190
-            pdf.table_header(_CW, ["Tanggal", "ISP / Lokasi", "Mati", "Pulih", "Durasi", "Status"], 7)
+            # Kolom "Terpantau" memisahkan lama mati yang BENAR-BENAR terukur dari
+            # durasi total. Kalau pemantauan sempat mati, durasi total sebagian
+            # berasal dari jam yang dilaporkan router, bukan dari pengamatan kita.
+            _CW = [19, 48, 35, 35, 18, 18, 17]   # sum = 190
+            pdf.table_header(_CW, ["Tanggal", "ISP / Lokasi", "Mati", "Pulih",
+                                   "Durasi", "Terpantau", "Status"], 7)
             pdf.set_font("Helvetica", "", 7.5)
+            _any_uncertain = False
             for idx, inc in enumerate(sorted(isp_incidents, key=lambda x: x["down_at"])):
                 pdf.set_fill_color(*(_C_GOLD_LT if idx % 2 == 0 else _C_WHITE))
                 pdf.set_text_color(*_C_BODY)
@@ -1937,15 +1942,34 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                 u_at = (datetime.datetime.strptime(inc["up_at"], "%Y-%m-%d %H:%M:%S")
                         if inc["up_at"] else None)
                 fill = idx % 2 == 0
-                pdf.cell(_CW[0], 7, d_at.strftime("%d-%m-%Y"), border=1, align="C", fill=fill)
-                pdf.cell(_CW[1], 7, _lat(inc["name"])[:34], border=1, align="L", fill=fill)
-                pdf.cell(_CW[2], 7, d_at.strftime("%d-%m-%Y %H:%M:%S"), border=1, align="C", fill=fill)
-                pdf.cell(_CW[3], 7, u_at.strftime("%d-%m-%Y %H:%M:%S") if u_at else "-",
+                _certain = inc.get("duration_certain", True)
+                if not _certain:
+                    _any_uncertain = True
+                pdf.cell(_CW[0], 7, d_at.strftime("%d-%m-%y"), border=1, align="C", fill=fill)
+                pdf.cell(_CW[1], 7, _lat(inc["name"])[:30], border=1, align="L", fill=fill)
+                pdf.cell(_CW[2], 7, d_at.strftime("%d-%m %H:%M:%S"), border=1, align="C", fill=fill)
+                pdf.cell(_CW[3], 7, u_at.strftime("%d-%m %H:%M:%S") if u_at else "-",
                          border=1, align="C", fill=fill)
-                pdf.cell(_CW[4], 7, noc_report._fmt_dur(inc["duration_seconds"]), border=1, align="R", fill=fill)
+                _dur_txt = noc_report._fmt_dur(inc["duration_seconds"]) + ("" if _certain else "*")
+                pdf.cell(_CW[4], 7, _dur_txt, border=1, align="R", fill=fill)
+                pdf.set_text_color(*((176, 35, 24) if not _certain else _C_BODY))
+                pdf.cell(_CW[5], 7, noc_report._fmt_dur(inc.get("observed_seconds")),
+                         border=1, align="R", fill=fill)
                 pdf.set_text_color(*((200, 30, 30) if inc["ongoing"] else _C_BODY))
-                pdf.cell(_CW[5], 7, "MASIH MATI" if inc["ongoing"] else "Pulih", border=1, align="C",
+                pdf.cell(_CW[6], 7, "MASIH MATI" if inc["ongoing"] else "Pulih", border=1, align="C",
                          fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if _any_uncertain:
+                pdf.ln(1)
+                pdf.set_font("Helvetica", "I", 7)
+                pdf.set_text_color(176, 35, 24)
+                pdf.multi_cell(0, 4,
+                    "* Durasi bertanda bintang sebagian jatuh pada saat pemantauan mati, "
+                    "sehingga jam mati/pulihnya berasal dari catatan router (Netwatch) dan "
+                    "bukan dari pengamatan langsung. Kolom 'Terpantau' menunjukkan bagian "
+                    "yang benar-benar terukur. Perlakukan durasi total sebagai PERKIRAAN: "
+                    "perangkat bisa saja sempat pulih di tengah jeda tanpa tercatat.",
+                    align="L")
+                pdf.set_text_color(*_C_BODY)
         pdf.ln(4)
 
     # ── Metodologi penilaian ──

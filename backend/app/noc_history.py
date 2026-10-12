@@ -121,6 +121,13 @@ def _now_iso() -> str:
 # Jarak tanpa polling yang dianggap "pemantauan mati" (bukan sekadar restart cepat).
 MONITOR_GAP_THRESHOLD_SECONDS = 300
 
+# Blackout sependek ini masih boleh "disambung": perangkat yang DOWN sebelum dan
+# sesudahnya dianggap DOWN terus, supaya satu gangguan nyata tidak terpecah hanya
+# karena backend sempat restart. Lebih lama dari ini, penyambungan TIDAK dilakukan:
+# kita cuma tahu perangkat DOWN di dua titik, bukan bahwa ia DOWN sepanjang jeda —
+# dulu asumsi itu melahirkan insiden 25 hari padahal 23 hari di antaranya buta.
+GAP_CARRY_FORWARD_MAX_SECONDS = int(os.getenv("NOC_GAP_CARRY_FORWARD_SECONDS", "900"))
+
 
 def _last_activity_iso(conn) -> Optional[str]:
     """Timestamp terakhir kali polling terbukti aktif — sampel metrik terbaru,
@@ -185,8 +192,15 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
     yang terus jalan sendiri walau backend kita mati) -- kapan status SEKARANG
     persis mulai.
 
-    - state SAMA dgn sebelum mati → event lama DITERUSKAN (perangkat yang masih
-      DOWN dihitung mati sejak semalam; yang masih UP dianggap UP selama blackout).
+    - state SAMA dgn sebelum mati:
+        * jeda <= GAP_CARRY_FORWARD_MAX_SECONDS (restart singkat), atau state UP
+          → event lama DITERUSKAN.
+        * jeda panjang → event lama DITUTUP di `gap_start`, lalu dibuka event baru
+          di `since` (kalau router melaporkan status sekarang mulai sesudah jeda)
+          atau di sekarang. Alasannya: kita hanya tahu perangkat DOWN di dua titik,
+          bukan bahwa ia DOWN sepanjang jeda. Menyambungkannya membuat durasi
+          insiden menelan lama blackout (pernah menghasilkan insiden 25 hari
+          padahal 23 hari di antaranya tidak terpantau).
     - state BEDA & ada `since` yang masuk akal (antara mulainya event lama dan
       sekarang) → dipakai persis sebagai titik transisi, bukan tebakan. Jadi
       kalau perangkat mati jam 3 sore lalu backend baru nyala lagi jam 3 pagi,
@@ -198,6 +212,9 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
     init_db()
     now = _now_iso()
     now_dt = datetime.datetime.strptime(now, _FMT)
+    gap_start_dt = _safe_parse(gap_start)
+    gap_seconds = ((now_dt - gap_start_dt).total_seconds()
+                   if gap_start_dt else float("inf"))
     cur_by_key = {e["key"]: e for e in entities}
     with _lock:
         conn = _connect()
@@ -218,6 +235,31 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
                 if cur["state"] == r["state"]:
                     if r["entity_name"] != cur["name"]:
                         conn.execute("UPDATE noc_events SET entity_name = ? WHERE id = ?", (cur["name"], r["id"]))
+                    # Status sama di dua sisi jeda. Menyambungkan event hanya sah
+                    # kalau jedanya pendek; untuk jeda panjang kita tidak punya
+                    # bukti perangkat DOWN terus-menerus, dan menyambungkannya
+                    # membuat durasi insiden ikut menelan lama blackout.
+                    if (r["state"] == "UP"
+                            or gap_seconds <= GAP_CARRY_FORWARD_MAX_SECONDS):
+                        continue
+                    since_dt = _safe_parse(cur.get("since"))
+                    if since_dt and gap_start_dt and gap_start_dt < since_dt <= now_dt:
+                        # Router melaporkan status sekarang baru mulai SESUDAH
+                        # pemantauan mati -> perangkat sempat pulih di tengah jeda.
+                        new_started = since_dt.strftime(_FMT)
+                    else:
+                        # Tak ada bukti sama sekali: yang bisa dipertanggungjawabkan
+                        # hanyalah "DOWN lagi saat pemantauan hidup kembali".
+                        new_started = now
+                    conn.execute(
+                        "UPDATE noc_events SET ended_at = MAX(started_at, ?) WHERE id = ?",
+                        (gap_start, r["id"]),
+                    )
+                    conn.execute(
+                        "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (cur["kind"], cur["key"], cur["name"], cur["state"], new_started),
+                    )
                     continue
 
                 # Transisi terjadi entah kapan selama blackout. Kalau ada `since`
@@ -645,6 +687,26 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         conn.close()
     rows = _clean_incident_rows(rows, min_seconds)
 
+    # Rentang blackout dipakai untuk menandai bagian durasi yang sebenarnya tidak
+    # terpantau. Perlu, karena riwayat lama bisa memuat insiden yang durasinya
+    # sudah menelan blackout (lihat reconcile_after_gap) dan tidak bisa dikoreksi
+    # ke belakang — minimal pembaca tahu bagian mana yang tidak terbukti.
+    # Rentangnya diambil sepanjang insiden TERPANJANG, bukan sebatas window
+    # laporan: sebuah insiden bisa mulai jauh sebelum window dan blackout yang
+    # menggelembungkan durasinya pun ada di luar window.
+    bo = []
+    if rows:
+        _spans = []
+        for r in rows:
+            _s = datetime.datetime.strptime(r["started_at"], _FMT)
+            _e = (datetime.datetime.strptime(r["ended_at"], _FMT)
+                  if r["ended_at"] else now_dt)
+            _spans.append((_s, _e))
+        bo = [(datetime.datetime.strptime(b["started_at"], _FMT),
+               datetime.datetime.strptime(b["ended_at"], _FMT))
+              for b in get_blackouts_range(min(s for s, _ in _spans),
+                                           max(e for _, e in _spans))]
+
     out = []
     for r in rows:
         started = datetime.datetime.strptime(r["started_at"], "%Y-%m-%d %H:%M:%S")
@@ -654,13 +716,25 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
         else:
             ended = now_dt
             ongoing = True
+        dur = int((ended - started).total_seconds())
+        unmon = 0
+        for bs, be in bo:
+            ov = (min(ended, be) - max(started, bs)).total_seconds()
+            if ov > 0:
+                unmon += int(ov)
+        unmon = min(unmon, dur)
         out.append({
             "kind": r["kind"],
             "key": r["entity_key"],
             "name": r["entity_name"],
             "down_at": r["started_at"],
             "up_at": r["ended_at"],
-            "duration_seconds": int((ended - started).total_seconds()),
+            "duration_seconds": dur,
+            # Bagian durasi yang jatuh pada saat pemantauan mati, dan bagian yang
+            # benar-benar terbukti terpantau.
+            "unmonitored_seconds": unmon,
+            "observed_seconds": max(0, dur - unmon),
+            "duration_certain": unmon == 0,
             "ongoing": ongoing,
         })
     return out
