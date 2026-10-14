@@ -272,28 +272,11 @@ def _start_scheduler():
                 except Exception:
                     time.sleep(5)
             if live:
-                # "since" (dari clock problem Zabbix utk site, dari MikroTik
-                # Netwatch utk device) dipakai reconcile_after_gap buat nentuin
-                # persis kapan transisi terjadi selama blackout (Zabbix/router
-                # tetap jalan sendiri walau backend kita mati), bukan asal nebak
-                # "baru saja" pas backend nyala lagi.
-                ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"],
-                         "since": s.get("since")}
-                        for s in live.get("sites", [])]
-                ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-",
-                          "state": d["state"], "since": d.get("since")}
-                         for d in live.get("devices", [])]
-                noc_history.reconcile_after_gap(ents, gap["started_at"])
+                _reconcile_noc_gap(gap, live)
             else:
                 logging.warning("NOC history: status live belum tersedia saat startup — event lama ditutup di titik terakhir")
                 noc_history.close_stale_open_events(close_at=gap["started_at"])
-            # Selama blackout tidak ada satu pun alert terkirim, jadi tanpa
-            # pemberitahuan ini diamnya sistem tidak bisa dibedakan dari "aman".
-            if gap["seconds"] >= NOC_BLACKOUT_NOTIFY_MIN_SECONDS:
-                try:
-                    _send_whatsapp_message(_format_blackout_notice(gap))
-                except Exception:
-                    logging.exception("NOC history: kirim notifikasi blackout gagal")
+                _notify_noc_blackout(gap)
         else:
             noc_history.close_stale_open_events()
     except Exception:
@@ -3568,12 +3551,67 @@ def _send_noc_alerts(transitions: List[Dict]):
             logging.exception("NOC WA alert down gagal dikirim")
 
 
+def _notify_noc_blackout(gap: Dict):
+    # Selama blackout tidak ada satu pun alert terkirim, jadi tanpa
+    # pemberitahuan ini diamnya sistem tidak bisa dibedakan dari "aman".
+    if gap["seconds"] >= NOC_BLACKOUT_NOTIFY_MIN_SECONDS:
+        try:
+            _send_whatsapp_message(_format_blackout_notice(gap))
+        except Exception:
+            logging.exception("NOC history: kirim notifikasi blackout gagal")
+
+
+def _reconcile_noc_gap(gap: Dict, live: Dict):
+    """Rekonsiliasi event sesudah jeda pemantauan pakai status terkini.
+    "since" (dari clock problem Zabbix utk site, dari MikroTik Netwatch utk
+    device) dipakai reconcile_after_gap buat nentuin persis kapan transisi
+    terjadi selama blackout (Zabbix/router tetap jalan sendiri walau backend
+    kita mati/PC sleep), bukan asal nebak "baru saja" pas polling jalan lagi."""
+    ents = [{"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"],
+             "since": s.get("since")}
+            for s in live.get("sites", [])]
+    ents += [{"kind": "device", "key": _device_key(d), "name": d.get("name") or "-",
+              "state": d["state"], "since": d.get("since")}
+             for d in live.get("devices", [])]
+    noc_history.reconcile_after_gap(ents, gap["started_at"])
+    _notify_noc_blackout(gap)
+
+    # Perangkat yang alert DOWN-nya sudah terkirim lalu pulih SELAMA jeda nggak
+    # akan muncul sebagai transisi di record_snapshot (event-nya sudah ditutup
+    # reconcile di atas), jadi WA "UP"-nya dikirim dari sini -- pakai jam pulih
+    # asli dari router/Zabbix kalau ada.
+    fmt = "%Y-%m-%d %H:%M:%S"
+    for e in ents:
+        if e["state"] == "DOWN":
+            continue
+        entry = _WA_PENDING_DOWN.pop(e["key"], None)
+        if not entry or not entry["notified"]:
+            continue
+        down_at = entry["change"].get("changed_at")
+        up_at = e.get("since") or datetime.datetime.now().strftime(fmt)
+        try:
+            dur = int((datetime.datetime.strptime(up_at, fmt)
+                       - datetime.datetime.strptime(down_at, fmt)).total_seconds())
+        except (TypeError, ValueError):
+            dur = None
+        try:
+            _send_whatsapp_message(_format_noc_alert({
+                "kind": e["kind"], "key": e["key"], "name": e["name"],
+                "old_state": "DOWN", "new_state": e["state"], "changed_at": up_at,
+                "down_at": down_at, "duration_seconds": max(dur, 0) if dur is not None else None,
+            }))
+        except Exception:
+            logging.exception("NOC WA alert pulih (sesudah jeda) gagal dikirim")
+
+
 def _poll_noc_history():
     """Dipanggil berkala oleh scheduler: rekam kalau ada site/perangkat yang
     status-nya berubah sejak polling terakhir (lihat noc_history.py)."""
-    # Deteksi kalau polling sempat berhenti lama (server dimatikan / backend crash)
+    # Deteksi kalau polling sempat berhenti lama (server dimatikan / backend crash /
+    # PC sleep semalaman -- proses tetap hidup jadi startup handler nggak jalan)
+    gap = None
     try:
-        noc_history.record_monitoring_gap()
+        gap = noc_history.record_monitoring_gap()
     except Exception:
         traceback.print_exc()
 
@@ -3581,7 +3619,18 @@ def _poll_noc_history():
         payload = build_noc_live()
     except Exception:
         traceback.print_exc()
+        if gap:
+            noc_history.close_stale_open_events(close_at=gap["started_at"])
+            _notify_noc_blackout(gap)
         return
+
+    # Tanpa ini, perubahan yang terjadi selama jeda dicap waktu polling
+    # pertama sesudahnya (mis. device UP sejak kemarin sore tercatat UP pagi ini).
+    if gap:
+        try:
+            _reconcile_noc_gap(gap, payload)
+        except Exception:
+            logging.exception("NOC history: gagal rekonsiliasi event sesudah jeda")
 
     entities = []
     for s in payload.get("sites", []):
