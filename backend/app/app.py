@@ -3081,7 +3081,9 @@ def build_weighted_breakdown(summary: List[Dict]) -> List[Dict]:
 # ─────────────────────────────────────────────
 
 NOC_CACHE: Dict[str, Tuple[datetime.datetime, Dict]] = {}
-NOC_CACHE_TTL_SECONDS = 15
+# Harus lebih panjang dari NOC_HISTORY_POLL_SECONDS (30 dtk): job polling mengisi cache ini
+# tiap siklus, jadi permintaan dari dashboard hampir selalu kena cache (instan).
+NOC_CACHE_TTL_SECONDS = 40
 
 ZBX_SEVERITY_LABEL = {
     0: "Not classified", 1: "Information", 2: "Warning",
@@ -3344,12 +3346,23 @@ def _noc_client_counts() -> Dict[str, Optional[int]]:
 
 
 def build_noc_live() -> Dict:
-    sites = [_noc_site_snapshot(label, cfg) for label, cfg in ITEM_MAP.items()]
+    # Sumber data berbeda (tiap site di Zabbix, Netwatch semua router, problem,
+    # jumlah klien) tidak saling bergantung -> ambil paralel. Berurutan, lama total
+    # = jumlah semuanya; paralel, cukup sebesar yang paling lambat.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        f_devices = pool.submit(_noc_devices)
+        f_problems = pool.submit(_noc_problems)
+        f_clients = pool.submit(_noc_client_counts)
+        sites = list(pool.map(lambda kv: _noc_site_snapshot(*kv), ITEM_MAP.items()))
+        devices = f_devices.result()
+        problems = f_problems.result()
+        clients = f_clients.result()
+
     counts = {"total": len(sites), "up": 0, "warn": 0, "down": 0, "unknown": 0}
     for s in sites:
         counts[s["state"].lower()] = counts.get(s["state"].lower(), 0) + 1
 
-    devices = _noc_devices()
     device_counts = {
         "total": len(devices),
         "up": sum(1 for d in devices if d["state"] == "UP"),
@@ -3357,8 +3370,6 @@ def build_noc_live() -> Dict:
         "unknown": sum(1 for d in devices if d["state"] == "UNKNOWN"),
     }
 
-    problems = _noc_problems()
-    clients = _noc_client_counts()
     return {
         "success": True,
         "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
