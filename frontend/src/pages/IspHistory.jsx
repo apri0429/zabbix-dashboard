@@ -162,7 +162,7 @@ export default function IspHistory({ mode = "isp" }) {
       total: list.length,
       up: list.filter((i) => i.state === "UP").length,
       down: list.filter((i) => i.state === "DOWN").length,
-      incidents: (data?.incidents || []).length,
+      incidents: data?.incident_total ?? (data?.incidents || []).length,
     };
   }, [data]);
 
@@ -377,6 +377,11 @@ export default function IspHistory({ mode = "isp" }) {
           }}>
             <div style={{ fontWeight: 700, fontSize: 14.5 }}>
               Daftar insiden <span style={{ color: T.muted, fontWeight: 500 }}>({incidents.length})</span>
+              {data.incident_total > data.incidents.length && (
+                <div style={{ fontSize: 11.5, color: "#8a6100", fontWeight: 500, marginTop: 2 }}>
+                  Menampilkan {data.incidents.length} terbaru dari {data.incident_total} insiden. Pilih rentang lebih pendek untuk yang lebih lama.
+                </div>
+              )}
             </div>
             {isDevice ? (
               ispKey !== "all" && (

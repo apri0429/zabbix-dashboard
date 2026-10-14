@@ -114,6 +114,9 @@ def init_db():
 
 
 _FMT = "%Y-%m-%d %H:%M:%S"
+# Timestamp disimpan "YYYY-MM-DD HH:MM:SS"; fromisoformat ±10x lebih cepat dari strptime
+# (penting: dipanggil puluhan ribu kali saat membaca riwayat panjang).
+_dt = datetime.datetime.fromisoformat
 
 
 def _now_iso() -> str:
@@ -151,14 +154,14 @@ def record_monitoring_gap(reference: Optional[str] = None) -> Optional[Dict]:
     Mengembalikan dict blackout bila tercatat, None kalau tidak ada gap berarti."""
     init_db()
     now_dt = datetime.datetime.now()
-    ref_dt = datetime.datetime.strptime(reference, _FMT) if reference else now_dt
+    ref_dt = _dt(reference) if reference else now_dt
     with _lock:
         conn = _connect()
         try:
             last = _last_activity_iso(conn)
             if not last:
                 return None
-            last_dt = datetime.datetime.strptime(last, _FMT)
+            last_dt = _dt(last)
             gap = (ref_dt - last_dt).total_seconds()
             if gap <= MONITOR_GAP_THRESHOLD_SECONDS:
                 return None
@@ -183,7 +186,7 @@ def _safe_parse(ts: Optional[str]) -> Optional[datetime.datetime]:
     if not ts:
         return None
     try:
-        return datetime.datetime.strptime(ts, _FMT)
+        return _dt(ts)
     except (ValueError, TypeError):
         return None
 
@@ -213,7 +216,7 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
     """
     init_db()
     now = _now_iso()
-    now_dt = datetime.datetime.strptime(now, _FMT)
+    now_dt = _dt(now)
     gap_start_dt = _safe_parse(gap_start)
     gap_seconds = ((now_dt - gap_start_dt).total_seconds()
                    if gap_start_dt else float("inf"))
@@ -339,8 +342,8 @@ def get_blackouts_range(start_dt: datetime.datetime,
     # Potong di batas window dulu.
     clipped = []
     for r in rows:
-        s = max(datetime.datetime.strptime(r["started_at"], _FMT), start_dt)
-        e = min(datetime.datetime.strptime(r["ended_at"], _FMT), end_dt)
+        s = max(_dt(r["started_at"]), start_dt)
+        e = min(_dt(r["ended_at"]), end_dt)
         if (e - s).total_seconds() > 0:
             clipped.append((s, e))
 
@@ -549,8 +552,8 @@ def _merge_flaps(rows: List[sqlite3.Row]) -> List[Dict]:
             if cur["ended_at"] is None:
                 # cur masih berlangsung (normalnya cuma satu open event per entity)
                 continue
-            gap = (datetime.datetime.strptime(e["started_at"], _FMT)
-                   - datetime.datetime.strptime(cur["ended_at"], _FMT)).total_seconds()
+            gap = (_dt(e["started_at"])
+                   - _dt(cur["ended_at"])).total_seconds()
             if gap <= FLAP_MERGE_GAP_SECONDS:
                 cur["ended_at"] = e["ended_at"]
                 cur["entity_name"] = e["entity_name"]
@@ -571,8 +574,8 @@ def _drop_short_incidents(rows: List[Dict], min_seconds: int = MIN_INCIDENT_SECO
         if r["ended_at"] is None:
             out.append(r)
             continue
-        started = datetime.datetime.strptime(r["started_at"], _FMT)
-        ended = datetime.datetime.strptime(r["ended_at"], _FMT)
+        started = _dt(r["started_at"])
+        ended = _dt(r["ended_at"])
         if (ended - started).total_seconds() >= min_seconds:
             out.append(r)
     return out
@@ -629,8 +632,8 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
 
     agg: Dict[str, Dict] = {}
     for r in rows:
-        started = datetime.datetime.strptime(r["started_at"], "%Y-%m-%d %H:%M:%S")
-        ended = (datetime.datetime.strptime(r["ended_at"], "%Y-%m-%d %H:%M:%S")
+        started = _dt(r["started_at"])
+        ended = (_dt(r["ended_at"])
                  if r["ended_at"] else now_dt)
         clipped_start = max(started, win_start)
         clipped_end = min(ended, win_end)
@@ -707,20 +710,20 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     if rows:
         _spans = []
         for r in rows:
-            _s = datetime.datetime.strptime(r["started_at"], _FMT)
-            _e = (datetime.datetime.strptime(r["ended_at"], _FMT)
+            _s = _dt(r["started_at"])
+            _e = (_dt(r["ended_at"])
                   if r["ended_at"] else now_dt)
             _spans.append((_s, _e))
-        bo = [(datetime.datetime.strptime(b["started_at"], _FMT),
-               datetime.datetime.strptime(b["ended_at"], _FMT))
+        bo = [(_dt(b["started_at"]),
+               _dt(b["ended_at"]))
               for b in get_blackouts_range(min(s for s, _ in _spans),
                                            max(e for _, e in _spans))]
 
     out = []
     for r in rows:
-        started = datetime.datetime.strptime(r["started_at"], "%Y-%m-%d %H:%M:%S")
+        started = _dt(r["started_at"])
         if r["ended_at"]:
-            ended = datetime.datetime.strptime(r["ended_at"], "%Y-%m-%d %H:%M:%S")
+            ended = _dt(r["ended_at"])
             ongoing = False
         else:
             ended = now_dt
@@ -747,6 +750,9 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
             "ongoing": ongoing,
         })
     return out
+
+
+ISP_OVERVIEW_MAX_INCIDENTS = 500
 
 
 def _is_isp_key(key: str) -> bool:
@@ -790,17 +796,19 @@ def _get_overview(days: int, is_member) -> Dict:
 
     conn = _connect()
     try:
+        # GROUP BY sekali jalan. Versi subquery-per-baris (WHERE id = (SELECT MAX(id) ...))
+        # menelusuri tabel lagi untuk SETIAP baris -> kuadratik, ±5 dtk di 50 ribu baris.
         latest = conn.execute(
-            "SELECT entity_key, entity_name, state, started_at FROM noc_events e "
-            "WHERE kind = 'device' AND id = "
-            "(SELECT MAX(id) FROM noc_events WHERE entity_key = e.entity_key)"
+            "SELECT e.entity_key, e.entity_name, e.state, e.started_at FROM noc_events e "
+            "JOIN (SELECT entity_key, MAX(id) AS mid FROM noc_events "
+            "WHERE kind = 'device' GROUP BY entity_key) m ON e.id = m.mid"
         ).fetchall()
     finally:
         conn.close()
     latest = [r for r in latest if is_member(r["entity_key"])]
 
     stats = {s["key"]: s for s in get_uptime_stats_range(start_dt, now_dt, kind="device")}
-    log = [x for x in get_downtime_log_range(start_dt, now_dt, kind="device")
+    log = [x for x in get_downtime_log_range(start_dt, now_dt, kind="device", limit=50000)
            if is_member(x["key"])]
     longest: Dict[str, int] = {}
     for x in log:
@@ -825,11 +833,15 @@ def _get_overview(days: int, is_member) -> Dict:
         })
     isps.sort(key=lambda i: (i["location"].lower(), i["name"].lower()))
     log.sort(key=lambda x: x["down_at"], reverse=True)
+    incident_total = len(log)
     return {
         "days": days,
         "generated_at": now_dt.strftime(_FMT),
         "isps": isps,
-        "incidents": log,
+        # Browser cukup menampilkan yang terbaru; ribuan baris cuma memberatkan
+        # transfer & render. Total sebenarnya dikirim terpisah.
+        "incident_total": incident_total,
+        "incidents": log[:ISP_OVERVIEW_MAX_INCIDENTS],
         "coverage": get_coverage(start_dt, now_dt),
     }
 
@@ -925,9 +937,9 @@ def get_downtime_log(kind: Optional[str] = None, days: int = 7, limit: int = 200
         rows = sorted(_clean_incident_rows(rows), key=lambda r: r["started_at"], reverse=True)
         out = []
         for r in rows:
-            started = datetime.datetime.strptime(r["started_at"], "%Y-%m-%d %H:%M:%S")
+            started = _dt(r["started_at"])
             if r["ended_at"]:
-                ended = datetime.datetime.strptime(r["ended_at"], "%Y-%m-%d %H:%M:%S")
+                ended = _dt(r["ended_at"])
                 duration = int((ended - started).total_seconds())
                 ongoing = False
             else:

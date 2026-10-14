@@ -3760,12 +3760,26 @@ def api_noc_trend(minutes: int = Query(120, ge=15, le=360)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_OVERVIEW_CACHE: Dict[str, Tuple[datetime.datetime, Dict]] = {}
+OVERVIEW_CACHE_TTL_SECONDS = 30  # data hanya berubah tiap siklus polling (30 dtk)
+
+
+def _cached_overview(kind: str, days: int, builder) -> Dict:
+    """Hitung ringkasan riwayat sekali per (kind, days) per 30 dtk, supaya banyak
+    penonton / auto-refresh browser tidak menghitung ulang riwayat panjang."""
+    key = f"{kind}:{days}"
+    cached = get_cache_value(_OVERVIEW_CACHE, key)
+    if cached is not None:
+        return cached
+    return set_cache_value(_OVERVIEW_CACHE, key, {"success": True, **builder(days=days)}, OVERVIEW_CACHE_TTL_SECONDS)
+
+
 @app.get("/api/noc/isp")
 def api_noc_isp(days: int = Query(7, ge=1, le=365)):
     """Catatan ISP: status terkini, uptime, jumlah & durasi down, dan daftar
     insiden per ISP (entri Netwatch ber-host IP publik), dibaca dari riwayat SQLite."""
     try:
-        return {"success": True, **noc_history.get_isp_overview(days=days)}
+        return _cached_overview("isp", days, noc_history.get_isp_overview)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -3776,7 +3790,7 @@ def api_noc_devices(days: int = Query(7, ge=1, le=365)):
     """Catatan perangkat LAN (AP, switch, dll. dari Netwatch): status terkini,
     uptime, jumlah & durasi down, dan daftar insiden, dari riwayat SQLite."""
     try:
-        return {"success": True, **noc_history.get_device_overview(days=days)}
+        return _cached_overview("devices", days, noc_history.get_device_overview)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
