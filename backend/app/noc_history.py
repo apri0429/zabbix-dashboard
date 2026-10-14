@@ -12,9 +12,9 @@ Keterbatasan yang perlu disadari:
   nggak ada data sebelum itu.
 - Resolusi waktu segranular interval polling-nya (lihat NOC_HISTORY_POLL_SECONDS
   di app.py), bukan real-time persis detik ke detik.
-- Kalau backend restart, event yang masih "berlangsung" saat itu otomatis
-  ditutup di titik terakhir sebelum restart (supaya nggak nyangkut open
-  selamanya) — durasinya jadi sedikit lebih pendek dari kenyataan.
+- Restart singkat (jeda <= MONITOR_GAP_THRESHOLD_SECONDS) tidak memutus event:
+  polling berikutnya meneruskannya. Jeda lebih lama dicatat sebagai blackout
+  dan event direkonsiliasi (lihat reconcile_after_gap).
 
 Buat Log Insiden & statistik supaya jelas & akurat (bukan raw noc_events mentah),
 dua hal berikut diterapkan tiap kali dibaca (lihat _clean_incident_rows):
@@ -23,10 +23,12 @@ dua hal berikut diterapkan tiap kali dibaca (lihat _clean_incident_rows):
   insiden yang sebenarnya cuma satu (misalnya mati dari jam 4 sore) tidak
   terpotong-potong jadi banyak baris pendek gara-gara sempat "UP" sesaat.
 - Sesudah digabung, insiden yang SUDAH SELESAI dan durasinya masih di bawah
-  MIN_INCIDENT_SECONDS dibuang (dianggap noise polling, bukan insiden beneran).
+  MIN_INCIDENT_SECONDS (default 15 menit, env NOC_MIN_INCIDENT_SECONDS) tidak
+  ditampilkan/dihitung sebagai insiden.
   Insiden yang masih berlangsung tidak pernah dibuang oleh aturan ini.
 """
 
+import ipaddress
 import os
 import sqlite3
 import datetime
@@ -501,16 +503,24 @@ def get_trend(minutes: int = 120, max_points: int = 120) -> Dict[str, List[Dict]
     return by_key
 
 
-# Kejadian DOWN yang sudah selesai & durasinya di bawah ini dianggap kedipan/noise
-# sesaat (mis. satu siklus polling yang meleset) — tidak dihitung sebagai insiden.
+# Kejadian DOWN yang sudah selesai & durasinya di bawah ini tidak dicatat sebagai
+# insiden (Log Insiden, halaman Catatan ISP/Perangkat, statistik uptime, dan laporan):
+# gangguan singkat dianggap bukan masalah yang perlu ditindaklanjuti. Data mentah di
+# noc_events tetap utuh, jadi ambang ini bisa diubah kapan saja tanpa kehilangan data.
 # Yang masih berlangsung tidak pernah dibuang oleh ambang ini, berapa pun umurnya
 # sejauh ini, karena kita belum tahu itu bakal jadi insiden panjang atau bukan.
-MIN_INCIDENT_SECONDS = 60
+# Catatan: downtime dari insiden yang dibuang juga tidak ikut dihitung di uptime %.
+def _env_seconds(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
-# Ambang khusus LAPORAN (PDF & rekap WA): mati di bawah 10 menit tidak dihitung
-# sebagai insiden, supaya angka laporan mencerminkan gangguan yang benar-benar
-# berarti. Dashboard & Log Insiden tetap pakai MIN_INCIDENT_SECONDS.
-REPORT_MIN_INCIDENT_SECONDS = 600
+
+MIN_INCIDENT_SECONDS = _env_seconds("NOC_MIN_INCIDENT_SECONDS", 900)
+
+# Ambang khusus LAPORAN (PDF & rekap WA). Default sama dengan dashboard.
+REPORT_MIN_INCIDENT_SECONDS = _env_seconds("NOC_REPORT_MIN_INCIDENT_SECONDS", MIN_INCIDENT_SECONDS)
 
 # Dua kejadian DOWN berurutan milik entity yang sama, kalau jeda UP di antaranya
 # lebih pendek dari ini, dianggap satu insiden yang sama yang cuma sempat "kedip"
@@ -594,11 +604,10 @@ def get_uptime_stats_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     win_start = start_dt
     win_end = min(end_dt, now_dt)
     window_seconds = max(0.0, (win_end - win_start).total_seconds())
-    # Catatan: window TIDAK dikurangi durasi blackout. Alasannya, status sebelum &
-    # sesudah blackout tetap dipakai: perangkat yang DOWN sebelum mati DAN masih
-    # DOWN saat pemantauan hidup lagi → event-nya diteruskan (reconcile_after_gap),
-    # jadi blackout ikut dihitung down. Yang UP di kedua sisi dianggap UP selama
-    # blackout. Yang hilang hanyalah kejadian singkat yang murni di dalam blackout.
+    # Catatan: window TIDAK dikurangi durasi blackout. Down selama blackout hanya
+    # terhitung bila terbukti (jam `since` dari router/Zabbix, lihat
+    # reconcile_after_gap); sisanya dianggap UP. Jadi uptime pada periode dengan
+    # cakupan rendah (get_coverage) adalah batas atas, bukan angka pasti.
     lo = win_start.strftime("%Y-%m-%d %H:%M:%S")
     hi = win_end.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -738,6 +747,102 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
             "ongoing": ongoing,
         })
     return out
+
+
+def _is_isp_key(key: str) -> bool:
+    """entity_key perangkat ISP: host-nya IP publik (mis. 8.8.8.8 / 1.1.1.1 di
+    Netwatch), bukan perangkat LAN. Format key: device:<router>:<host>."""
+    if not key.startswith("device:") or ":" not in key[7:]:
+        return False
+    try:
+        return not ipaddress.ip_address(key.rsplit(":", 1)[1]).is_private
+    except ValueError:
+        return False
+
+
+def _is_device_key(key: str) -> bool:
+    """entity_key perangkat LAN (AP, switch, dll.): host-nya IP privat. Entri
+    semu seperti "<router> (gagal dibaca)" dan ISP (IP publik) tidak termasuk."""
+    if not key.startswith("device:") or ":" not in key[7:]:
+        return False
+    try:
+        return ipaddress.ip_address(key.rsplit(":", 1)[1]).is_private
+    except ValueError:
+        return False
+
+
+def get_isp_overview(days: int = 7) -> Dict:
+    return _get_overview(days, _is_isp_key)
+
+
+def get_device_overview(days: int = 7) -> Dict:
+    return _get_overview(days, _is_device_key)
+
+
+def _get_overview(days: int, is_member) -> Dict:
+    """Ringkasan + daftar insiden entity perangkat (ISP atau perangkat LAN, sesuai
+    `is_member`) untuk `days` hari terakhir, plus cakupan pemantauan supaya angka
+    uptime tidak terbaca lebih pasti dari kenyataan (jam saat backend mati tidak
+    terekam)."""
+    init_db()
+    now_dt = datetime.datetime.now()
+    start_dt = now_dt - datetime.timedelta(days=days)
+
+    conn = _connect()
+    try:
+        latest = conn.execute(
+            "SELECT entity_key, entity_name, state, started_at FROM noc_events e "
+            "WHERE kind = 'device' AND id = "
+            "(SELECT MAX(id) FROM noc_events WHERE entity_key = e.entity_key)"
+        ).fetchall()
+    finally:
+        conn.close()
+    latest = [r for r in latest if is_member(r["entity_key"])]
+
+    stats = {s["key"]: s for s in get_uptime_stats_range(start_dt, now_dt, kind="device")}
+    log = [x for x in get_downtime_log_range(start_dt, now_dt, kind="device")
+           if is_member(x["key"])]
+    longest: Dict[str, int] = {}
+    for x in log:
+        longest[x["key"]] = max(longest.get(x["key"], 0), x["duration_seconds"])
+
+    isps = []
+    for r in latest:
+        key = r["entity_key"]
+        st = stats.get(key)
+        isps.append({
+            "key": key,
+            "name": r["entity_name"],
+            "location": key.split(":")[1],
+            "host": key.rsplit(":", 1)[1],
+            "state": r["state"],
+            "state_since": r["started_at"],
+            "uptime_pct": st["uptime_pct"] if st else 100.0,
+            "incidents": st["incidents"] if st else 0,
+            "downtime_seconds": st["downtime_seconds"] if st else 0,
+            "mttr_seconds": st["mttr_seconds"] if st else None,
+            "longest_seconds": longest.get(key, 0),
+        })
+    isps.sort(key=lambda i: (i["location"].lower(), i["name"].lower()))
+    log.sort(key=lambda x: x["down_at"], reverse=True)
+    return {
+        "days": days,
+        "generated_at": now_dt.strftime(_FMT),
+        "isps": isps,
+        "incidents": log,
+        "coverage": get_coverage(start_dt, now_dt),
+    }
+
+
+def get_open_entity_keys() -> set:
+    """entity_key yang event-nya masih berlangsung."""
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT DISTINCT entity_key FROM noc_events WHERE ended_at IS NULL").fetchall()
+    finally:
+        conn.close()
+    return {r["entity_key"] for r in rows}
 
 
 def close_stale_open_events(valid_keys: Optional[set] = None, close_at: Optional[str] = None):

@@ -5,10 +5,13 @@ import DhcpActive from "./pages/DhcpActive";
 import Livebandwotdh from "./pages/Livebanditdh";
 import MikrotikStatus from "./pages/MikrotikStatus";
 import NocView from "./pages/NocView";
+import IspHistory from "./pages/IspHistory";
 
 const PAGE_TITLES = {
   "dashboard":      "Dashboard",
   "noc":            "NOC Monitor",
+  "isp":            "Catatan ISP",
+  "devices":        "Catatan Perangkat",
   "user-active":    "User Active",
   "live-bandwidth": "Live Bandwidth",
   "mikrotik":       "Mikrotik",
@@ -27,6 +30,10 @@ export default function App() {
         <Dashboard />
       ) : currentMenu === "noc" ? (
         <NocView />
+      ) : currentMenu === "isp" ? (
+        <IspHistory mode="isp" />
+      ) : currentMenu === "devices" ? (
+        <IspHistory mode="device" />
       ) : currentMenu === "user-active" ? (
         <DhcpActive />
       ) : currentMenu === "live-bandwidth" ? (

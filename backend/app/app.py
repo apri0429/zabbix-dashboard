@@ -277,8 +277,10 @@ def _start_scheduler():
                 logging.warning("NOC history: status live belum tersedia saat startup — event lama ditutup di titik terakhir")
                 noc_history.close_stale_open_events(close_at=gap["started_at"])
                 _notify_noc_blackout(gap)
-        else:
-            noc_history.close_stale_open_events()
+        # Tanpa jeda berarti (restart singkat): event terbuka DIBIARKAN, polling
+        # pertama yang meneruskan / menutupnya. Dulu semuanya ditutup di sini lalu
+        # dibuka ulang ~30 dtk kemudian -> insiden terpotong & jeda itu terhitung UP.
+        # Entity yang sudah tidak ada ditutup oleh _close_vanished_noc_entities.
     except Exception:
         logging.exception("NOC history: gagal rekonsiliasi event saat startup")
     _cleanup_noc_history()
@@ -3128,7 +3130,7 @@ def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
         return snap
 
     items = zabbix_request("item.get", {
-        "output": ["name", "key_", "lastvalue", "lastclock"],
+        "output": ["itemid", "name", "key_", "lastvalue", "lastclock"],
         "hostids": [hostid],
         "limit": 3000,
     })
@@ -3205,14 +3207,23 @@ def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
         # Waktu mulai down yang sebenarnya (bukan "last_seen"/waktu polling
         # terakhir) — dipakai reconcile_after_gap biar incident down tetap
         # nyambung dari waktu asli walau backend sempat dimatikan/restart.
+        # Hanya problem dari trigger item ICMP ping: problem lain di host yang sama
+        # (CPU tinggi, interface, dll.) bisa jauh lebih tua & bukan awal down-nya.
         try:
+            icmp_itemid = (by_key.get("icmpping") or {}).get("itemid")
+            trigs = zabbix_request("trigger.get", {
+                "itemids": [icmp_itemid],
+                "output": ["triggerid"],
+            }) if icmp_itemid else []
+            trig_ids = [t["triggerid"] for t in trigs or [] if t.get("triggerid")]
+            # objectids kosong = tanpa filter di Zabbix, jadi jangan query sama sekali
             probs = zabbix_request("problem.get", {
-                "hostids": [hostid],
+                "objectids": trig_ids,
                 "output": ["clock"],
                 "sortfield": ["eventid"],
                 "sortorder": "ASC",
                 "limit": 1,
-            })
+            }) if trig_ids else []
             if probs:
                 clock = int(probs[0].get("clock") or 0)
                 if clock:
@@ -3604,6 +3615,25 @@ def _reconcile_noc_gap(gap: Dict, live: Dict):
             logging.exception("NOC WA alert pulih (sesudah jeda) gagal dikirim")
 
 
+def _close_vanished_noc_entities(payload: Dict, entities: List[Dict]):
+    """Tutup event terbuka milik entity yang sudah tidak dilaporkan lagi (site
+    dihapus dari ITEM_MAP, host dihapus dari Netwatch), supaya tidak tercatat
+    "masih berlangsung" selamanya. Perangkat dari router yang sedang gagal dibaca
+    TIDAK ditutup -- hilangnya cuma karena router-nya tak terjangkau."""
+    devices = payload.get("devices") or []
+    if not devices:
+        return  # pembacaan Netwatch gagal total -> jangan tutup apa pun
+    valid = {e["key"] for e in entities}
+    failed_prefixes = tuple(
+        f"device:{d.get('router_name') or '-'}:"
+        for d in devices if not d.get("host") and d.get("state") == "UNKNOWN"
+    )
+    open_keys = noc_history.get_open_entity_keys()
+    keep = {k for k in open_keys if k in valid or (failed_prefixes and k.startswith(failed_prefixes))}
+    if open_keys - keep:
+        noc_history.close_stale_open_events(valid_keys=keep)
+
+
 def _poll_noc_history():
     """Dipanggil berkala oleh scheduler: rekam kalau ada site/perangkat yang
     status-nya berubah sejak polling terakhir (lihat noc_history.py)."""
@@ -3641,6 +3671,11 @@ def _poll_noc_history():
     try:
         transitions = noc_history.record_snapshot(entities)
         _send_noc_alerts(transitions)  # tetap dipanggil walau kosong: cek down yg sudah lewat batas
+    except Exception:
+        traceback.print_exc()
+
+    try:
+        _close_vanished_noc_entities(payload, entities)
     except Exception:
         traceback.print_exc()
 
@@ -3709,6 +3744,28 @@ def api_noc_trend(minutes: int = Query(120, ge=15, le=360)):
     """Deret sampel latency/loss per site untuk N menit terakhir (sparkline)."""
     try:
         return {"success": True, "minutes": minutes, "series": noc_history.get_trend(minutes=minutes)}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/noc/isp")
+def api_noc_isp(days: int = Query(7, ge=1, le=365)):
+    """Catatan ISP: status terkini, uptime, jumlah & durasi down, dan daftar
+    insiden per ISP (entri Netwatch ber-host IP publik), dibaca dari riwayat SQLite."""
+    try:
+        return {"success": True, **noc_history.get_isp_overview(days=days)}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/noc/devices")
+def api_noc_devices(days: int = Query(7, ge=1, le=365)):
+    """Catatan perangkat LAN (AP, switch, dll. dari Netwatch): status terkini,
+    uptime, jumlah & durasi down, dan daftar insiden, dari riwayat SQLite."""
+    try:
+        return {"success": True, **noc_history.get_device_overview(days=days)}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

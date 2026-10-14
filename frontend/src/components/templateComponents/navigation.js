@@ -2,6 +2,8 @@ import {
   Activity,
   BarChartSquare02,
   CpuChip01,
+  Globe01,
+  Server01,
   LogOut01,
   Monitor01,
   Users01,
@@ -11,6 +13,8 @@ export const defaultNavigationPath = '/dashboard'
 export const implementedNavigationPaths = [
   '/dashboard',
   '/noc',
+  '/isp',
+  '/devices',
   '/user-active',
   '/live-bandwidth',
   '/mikrotik',
@@ -26,6 +30,16 @@ export const primaryNavigationItems = [
     label: 'NOC Monitor',
     href: '/noc',
     icon: Monitor01,
+  },
+  {
+    label: 'Catatan ISP',
+    href: '/isp',
+    icon: Globe01,
+  },
+  {
+    label: 'Catatan Perangkat',
+    href: '/devices',
+    icon: Server01,
   },
   {
     label: 'User Active',
