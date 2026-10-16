@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Users01, Wifi, MarkerPin05 } from "@untitledui/icons";
 import { buildApiUrl } from "../api";
-import "../components/templateComponents/templateComponents.css";
+import { NS, PageHeader, Panel, Alert, Field, MItem, MFacts, btn, fieldStyle, th, td, zebraRow } from "../components/ns";
 
 const T = {
-  navy:      "#1a2a57",
-  navyMid:   "#2d4a8c",
+  navy:      "#24385b",
+  navyMid:   "#2a5db0",
   teal:      "#2a9d8f",
   text:      "#0f2035",
   textSoft:  "#425575",
@@ -23,7 +23,7 @@ const Dot = ({ color, size = 6 }) => (
 /* Warna khas per router (sama pendekatan kayak siteColor di NOC) — tiap router
    dijatah warna berikutnya dari palet secara berurutan, biar gak ada dua router
    yang kebagian warna sama. */
-const SITE_PALETTE = ["#2563eb", "#7c3aed", "#0d9488", "#c2410c", "#be185d", "#4f46e5"];
+const SITE_PALETTE = ["#2a5db0"]; // satu warna netral, seragam dengan halaman lain
 const _siteColorAssigned = new Map();
 function siteColor(name) {
   const key = String(name || "");
@@ -37,20 +37,20 @@ function siteColor(name) {
 
 const Counter = ({ label, value, color, Icon }) => (
   <div style={{
-    background: T.surface, border: `1px solid ${T.borderMid}`, borderRadius: 12,
+    background: T.surface, border: `1px solid ${T.borderMid}`, borderRadius: 3,
     padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, minWidth: 0,
   }}>
     {Icon && (
       <span style={{
         flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-        width: 34, height: 34, borderRadius: 10, background: `${color}1c`, color,
+        width: 34, height: 34, borderRadius: 3, background: `${color}1c`, color,
       }}>
         <Icon width={17} height={17} />
       </span>
     )}
     <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", color: T.muted, textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.15, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.15, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>{value}</div>
     </div>
   </div>
 );
@@ -66,7 +66,6 @@ export default function DhcpActive() {
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdate, setLastUpdate]   = useState("");
   const [isMobile, setIsMobile]       = useState(() => window.innerWidth <= 640);
-  const [showScrollTop, setShowScrollTop] = useState(false);
 
   const routerOptions = [
     { value: "all", label: "Semua Router" },
@@ -80,12 +79,6 @@ export default function DhcpActive() {
     const onResize = () => setIsMobile(window.innerWidth <= 640);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
-    const onScroll = () => setShowScrollTop(window.scrollY > 200);
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const fetchDhcpActive = async (isBackground = false) => {
@@ -168,277 +161,127 @@ export default function DhcpActive() {
       .sort((a, b) => b.count - a.count);
   }, [data]);
 
+  const [hoverRow, setHoverRow] = useState(null);
+
   return (
-    <>
-      <style>{`
-        @keyframes dhcp-spin   { to { transform: rotate(360deg); } }
-        @keyframes dhcp-pulse  { 0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(1.2);} }
-        @keyframes dhcp-bar    { 0%{transform:scaleX(0) translateX(0)}50%{transform:scaleX(0.6) translateX(50%)}100%{transform:scaleX(0) translateX(200%)} }
-        .dhcp-select:focus, .dhcp-input:focus {
-          border-color: ${T.navy} !important;
-          box-shadow: 0 0 0 3px rgba(26,42,87,0.10) !important;
-          background: #fff !important;
-          outline: none;
-        }
-      `}</style>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: NS.font, color: NS.text }}>
+      <PageHeader
+        title="Active Users"
+        subtitle={`${data.length} devices connected (MikroTik DHCP) · ${refreshing ? "updating…" : `updated ${lastUpdate || "—"}`}`}
+      />
 
-      {/* Loading bar */}
-      {loading && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, zIndex: 9999, background: `linear-gradient(90deg,${T.navy},${T.navyMid},${T.teal})`, animation: "dhcp-bar 1.6s ease-in-out infinite", transformOrigin: "left center" }} />
-      )}
-
-      <div className="dashboard-content" style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", gap: 14 }}>
-        {/* ── Header — gaya NOC (panel terang, dot status, judul + subjudul) ── */}
-        <div className="dashboard-panel" style={{
-          padding: isMobile ? "12px 16px" : "14px 18px", display: "flex",
-          justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, flexShrink: 0,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-            <span style={{
-              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-              background: refreshing ? "#e9c46a" : T.teal,
-              boxShadow: `0 0 0 4px ${refreshing ? "rgba(233,196,106,0.18)" : "rgba(42,157,143,0.18)"}`,
-              animation: "dhcp-pulse 2s ease-in-out infinite",
-            }} />
-            <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: T.text }}>User Active</h2>
-              <div style={{ fontSize: 11.5, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
-                MikroTik DHCP · {refreshing ? "memperbarui…" : `update ${lastUpdate || "—"}`}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Counter jumlah user, mirip NOC — kartu lepas, selalu sejajar satu baris,
-            scroll ke samping kalau sempit, gak numpuk ke bawah */}
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", flexShrink: 0 }}>
-          <div style={{ flex: "1 1 160px", minWidth: 160 }}>
-            <Counter label="Total User Aktif" value={filteredData.length} color={T.navy} Icon={Users01} />
-          </div>
-          {routerCounts.map((r) => (
-            <div key={r.name} style={{ flex: "1 1 160px", minWidth: 160 }}>
-              <Counter label={r.name} value={r.count} color={siteColor(r.name)} Icon={r.name.toLowerCase().includes("ho") ? MarkerPin05 : Wifi} />
-            </div>
-          ))}
-        </div>
-
-        <div className="dashboard-panel" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-
-          {/* ── Filter bar ── */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "11px 16px" : "12px 28px", gap: 12, flexWrap: "wrap", background: T.surface, borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ position: "relative", flex: 1, minWidth: 0, maxWidth: 440 }}>
-              <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="15" height="15" viewBox="0 0 16 16" fill="none">
-                <path d="M7.33 12.67C10.28 12.67 12.67 10.28 12.67 7.33 12.67 4.39 10.28 2 7.33 2 4.39 2 2 4.39 2 7.33 2 10.28 4.39 12.67 7.33 12.67Z" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M14 14L11.1 11.1" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+      <Panel title="Filter" pad={12}>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: isMobile ? "1fr 1fr" : "2fr 1fr 1fr" }}>
+          <div style={{ gridColumn: isMobile ? "1 / -1" : "auto" }}>
+            <Field label="Cari">
               <input
                 type="text"
-                placeholder="Cari IP, MAC, hostname, router..."
+                placeholder="IP, MAC, hostname, router…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="dhcp-input"
-                style={{ width: "100%", padding: "9px 36px 9px 36px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, outline: "none", background: T.surfaceAlt, color: T.text, boxSizing: "border-box", fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
+                style={fieldStyle}
               />
-              {searchTerm && (
-                <button onClick={() => setSearchTerm("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: 2 }}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M9 3L3 9M3 3l6 6" stroke="#94a3b8" strokeWidth="1.6" strokeLinecap="round"/>
-                  </svg>
-                </button>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
-                  <rect x="1" y="3" width="12" height="8" rx="1.5" stroke={T.muted} strokeWidth="1.3"/>
-                  <circle cx="4" cy="7" r="0.9" fill={T.muted}/>
-                  <circle cx="7" cy="7" r="0.9" fill={T.muted}/>
-                  <circle cx="10" cy="7" r="0.9" fill={T.muted}/>
-                </svg>
-                <select
-                  value={routerId}
-                  onChange={(e) => setRouterId(e.target.value)}
-                  className="dhcp-select"
-                  style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 155, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
-                >
-                  {routerOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-              </div>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 11, pointerEvents: "none", zIndex: 1 }}>
-                  <path d="M2 3.5H12M2 7H12M2 10.5H12" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-                <select
-                  value={rowsPerPage}
-                  onChange={(e) => setRowsPerPage(e.target.value)}
-                  className="dhcp-select"
-                  style={{ padding: "8px 14px 8px 30px", border: `1px solid ${T.borderMid}`, borderRadius: 10, fontSize: 13, fontWeight: 500, outline: "none", background: T.surfaceAlt, color: T.text, cursor: "pointer", minWidth: 115, fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s" }}
-                >
-                  <option value="10">10 rows</option>
-                  <option value="25">25 rows</option>
-                  <option value="50">50 rows</option>
-                  <option value="100">100 rows</option>
-                  <option value="all">Semua</option>
-                </select>
-              </div>
-            </div>
+            </Field>
           </div>
+          <Field label="Router">
+            <select value={routerId} onChange={(e) => setRouterId(e.target.value)} style={fieldStyle}>
+              {routerOptions.map((r) => {
+                const n = r.value === "all" ? null : routerCounts.find((c) => c.name === r.label)?.count;
+                return <option key={r.value} value={r.value}>{r.label}{n != null ? ` (${n})` : ""}</option>;
+              })}
+            </select>
+          </Field>
+          <Field label="Baris per halaman">
+            <select value={rowsPerPage} onChange={(e) => setRowsPerPage(e.target.value)} style={fieldStyle}>
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="all">Semua</option>
+            </select>
+          </Field>
+        </div>
+      </Panel>
 
-          {/* ── Body (scrollable) ── */}
-          <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            {loading ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "72px 24px", gap: 14 }}>
-                <div style={{ width: 36, height: 36, border: `3px solid ${T.border}`, borderTop: `3px solid ${T.navy}`, borderRadius: "50%", animation: "dhcp-spin 0.85s linear infinite" }} />
-                <p style={{ margin: 0, color: T.muted, fontSize: 13.5, fontWeight: 500 }}>Memuat data DHCP...</p>
-              </div>
-            ) : error ? (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 14, margin: "20px 24px", padding: "16px 20px", background: "rgba(231,111,81,0.08)", border: "1px solid rgba(231,111,81,0.22)", borderRadius: 12 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(231,111,81,0.14)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-                    <circle cx="10" cy="10" r="9" stroke="#b42318" strokeWidth="1.5"/>
-                    <path d="M10 6v4M10 14h.01" stroke="#b42318" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                </div>
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#7a1c0e", marginBottom: 3 }}>Gagal memuat data</div>
-                  <div style={{ fontSize: 12.5, color: "#b42318", lineHeight: 1.5 }}>{error}</div>
-                </div>
-              </div>
-            ) : isMobile ? (
-              /* Mobile cards */
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px", background: T.surfaceAlt }}>
-                {displayedData.length > 0 ? displayedData.map((item, index) => (
-                  <div key={item[".id"] || `${item.address}-${index}`} className="dashboard-stack__item" style={{ padding: "14px", gap: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1, overflow: "hidden" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 22, height: 22, borderRadius: 6, background: T.navy, color: "#fff", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{rowNum(index)}</span>
-                        <Dot color="#2a9d8f" size={6} />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.router_name || "—"}</span>
-                      </div>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "rgba(42,157,143,0.10)", color: "#18786e", border: "1px solid rgba(42,157,143,0.22)", borderRadius: 99, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                        <Dot color="#2a9d8f" size={5} />{item.status || "Active"}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingBottom: 10, marginBottom: 10, borderBottom: `1px solid ${T.border}` }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0, minWidth: 34 }}>IP</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13.5, fontWeight: 700, color: T.navy, letterSpacing: "0.03em" }}>{item.address || "—"}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0, minWidth: 34 }}>MAC</span>
-                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 500, color: T.textSoft, letterSpacing: "0.04em" }}>{item["mac-address"] || "—"}</span>
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", background: "rgba(26,42,87,0.07)", color: T.navy, padding: "4px 10px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: `1px solid ${T.border}` }}>{item["host-name"] || "—"}</span>
-                      <span style={{ display: "inline-flex", alignItems: "center", background: T.surfaceAlt, color: T.textSoft, padding: "4px 10px", borderRadius: 8, fontSize: 11.5, fontWeight: 600, border: `1px solid ${T.border}` }}>{item.server || "—"}</span>
-                    </div>
-                  </div>
-                )) : <EmptyState />}
-              </div>
-            ) : (
-              /* Desktop table */
-              <div className="users-table-wrapper" style={{ marginTop: 0, borderRadius: 0, border: "none", borderTop: `1px solid ${T.border}`, overflow: "visible" }}>
-                <table className="users-table" style={{ minWidth: 640 }}>
-                  <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "#f0f4fa" }}>
-                    <tr>
-                      <th style={{ width: 52, textAlign: "center" }}>#</th>
-                      <th>Router</th>
-                      <th>IP Address</th>
-                      <th>MAC Address</th>
-                      <th>Hostname</th>
-                      <th>Server</th>
-                      <th style={{ textAlign: "center" }}>Status</th>
+      {error && <Alert tone="bad" title="Gagal memuat data">{error}</Alert>}
+
+      <Panel title="Daftar User Aktif" right={!loading && !error ? `Total: ${filteredData.length}` : null}>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: NS.label, fontSize: 13 }}>Memuat data DHCP…</div>
+        ) : error ? null : isMobile ? (
+          displayedData.length > 0 ? displayedData.map((item, index) => (
+            <MItem key={item[".id"] || `${item.address}-${index}`} i={index}
+              title={<span style={{ color: NS.link }}>{item.address || "—"}</span>}
+              sub={item["host-name"] || "Tanpa hostname"}
+              right={<span style={{ color: NS.ok, fontWeight: 700 }}>{item.status || "Active"}</span>}>
+              <MFacts cols={2} items={[
+                ["Router", item.router_name || "—"],
+                ["MAC Address", item["mac-address"] || "—"],
+              ]} />
+            </MItem>
+          )) : <EmptyState />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+              <thead>
+                <tr>
+                  {["#", "Router", "IP Address", "MAC Address", "Hostname", "Server", "Status"].map((h) => <th key={h} style={th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {displayedData.length > 0 ? displayedData.map((item, index) => {
+                  const rk = item[".id"] || `${item.address}-${index}`;
+                  return (
+                    <tr key={rk} onMouseEnter={() => setHoverRow(rk)} onMouseLeave={() => setHoverRow(null)}
+                      style={zebraRow(index, hoverRow === rk)}>
+                      <td style={{ ...td, color: NS.label, width: 48 }}>{rowNum(index)}</td>
+                      <td style={td}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          <Dot color={siteColor(item.router_name)} size={7} />
+                          {item.router_name || "—"}
+                        </span>
+                      </td>
+                      <td style={{ ...td, color: NS.link, fontWeight: 600 }}>{item.address || "—"}</td>
+                      <td style={{ ...td, color: NS.label }}>{item["mac-address"] || "—"}</td>
+                      <td style={td}>{item["host-name"] || "—"}</td>
+                      <td style={{ ...td, color: NS.label }}>{item.server || "—"}</td>
+                      <td style={{ ...td, color: NS.ok, fontWeight: 700 }}>{item.status || "Active"}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {displayedData.length > 0 ? displayedData.map((item, index) => (
-                      <tr key={item[".id"] || `${item.address}-${index}`}>
-                        <td style={{ textAlign: "center" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 24, height: 24, borderRadius: 6, background: "rgba(26,42,87,0.08)", fontSize: 11, fontWeight: 700, color: T.navy }}>{rowNum(index)}</span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <Dot color="#2a9d8f" size={7} />
-                            <span style={{ fontSize: 13, color: T.text, fontWeight: 600 }}>{item.router_name || "—"}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span style={{ display: "inline-block", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #dbeafe", padding: "3px 10px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace", letterSpacing: "0.03em" }}>{item.address || "—"}</span>
-                        </td>
-                        <td>
-                          <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.textSoft, border: `1px solid ${T.border}`, padding: "3px 10px", borderRadius: 7, fontSize: 12, fontFamily: "'IBM Plex Mono',monospace", letterSpacing: "0.03em" }}>{item["mac-address"] || "—"}</span>
-                        </td>
-                        <td>
-                          <span style={{ display: "inline-block", background: "rgba(26,42,87,0.07)", color: T.navy, padding: "3px 10px", borderRadius: 7, fontSize: 12, fontWeight: 600, border: `1px solid ${T.border}` }}>{item["host-name"] || "—"}</span>
-                        </td>
-                        <td>
-                          <span style={{ display: "inline-block", background: T.surfaceAlt, color: T.textSoft, border: `1px solid ${T.border}`, padding: "3px 10px", borderRadius: 7, fontSize: 12 }}>{item.server || "—"}</span>
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "rgba(42,157,143,0.10)", color: "#18786e", border: "1px solid rgba(42,157,143,0.22)", borderRadius: 99, fontSize: 11, fontWeight: 700 }}>
-                            <Dot color="#2a9d8f" size={5} />{item.status || "Active"}
-                          </span>
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr><td colSpan={7} style={{ padding: 0 }}><EmptyState /></td></tr>
-                    )}
-                  </tbody>
-                </table>
+                  );
+                }) : (
+                  <tr><td colSpan={7} style={{ padding: 0 }}><EmptyState /></td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!loading && !error && filteredData.length > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: NS.zebra, gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: NS.label }}>
+              Menampilkan <b style={{ color: NS.text }}>{startRow}–{endRow}</b> dari <b style={{ color: NS.text }}>{filteredData.length}</b> data
+            </span>
+            {rowsPerPage !== "all" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
+                  style={btn(false, currentPage === 1)}>‹ Sebelumnya</button>
+                <span style={{ fontSize: 13, fontWeight: 700, padding: "0 6px" }}>{currentPage} / {totalPages}</span>
+                <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                  style={btn(false, currentPage === totalPages)}>Berikutnya ›</button>
               </div>
             )}
           </div>
-
-          {/* ── Footer / pagination (pinned) ── */}
-          {!loading && !error && filteredData.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "12px 14px" : "14px 28px", background: T.surfaceAlt, borderTop: `1px solid ${T.border}`, gap: 12, flexWrap: "wrap", flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, color: T.muted, fontWeight: 500 }}>
-                Menampilkan&nbsp;<strong style={{ color: T.text }}>{startRow}–{endRow}</strong>&nbsp;dari&nbsp;<strong style={{ color: T.text }}>{filteredData.length}</strong>&nbsp;data
-              </span>
-              {rowsPerPage !== "all" && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, border: `1px solid ${T.borderMid}`, borderRadius: 9, background: T.surface, color: T.textSoft, cursor: currentPage === 1 ? "not-allowed" : "pointer", opacity: currentPage === 1 ? 0.35 : 1, transition: "all 0.15s" }}>
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: T.text, padding: "0 8px", minWidth: 58, textAlign: "center" }}>{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, border: `1px solid ${T.borderMid}`, borderRadius: 9, background: T.surface, color: T.textSoft, cursor: currentPage === totalPages ? "not-allowed" : "pointer", opacity: currentPage === totalPages ? 0.35 : 1, transition: "all 0.15s" }}>
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Scroll to top */}
-      {showScrollTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          title="Kembali ke atas"
-          style={{ position: "fixed", bottom: 28, right: 20, width: 44, height: 44, borderRadius: "50%", background: `linear-gradient(135deg,${T.navy},${T.navyMid})`, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: `0 4px 16px rgba(26,42,87,0.36)`, zIndex: 9999 }}
-        >
-          <svg width="17" height="17" viewBox="0 0 20 20" fill="none">
-            <path d="M10 15V5M5 10l5-5 5 5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
-      )}
-    </>
+        )}
+      </Panel>
+    </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div style={{ textAlign: "center", padding: "56px 24px" }}>
-      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 56, height: 56, borderRadius: "50%", background: "rgba(26,42,87,0.05)", marginBottom: 14 }}>
-        <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
-          <circle cx="14" cy="14" r="12" stroke="rgba(26,42,87,0.15)" strokeWidth="1.5"/>
-          <path d="M9 19l10-10M19 19L9 9" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round"/>
-        </svg>
-      </div>
-      <p style={{ margin: "0 0 5px", color: "#374151", fontSize: 14.5, fontWeight: 600 }}>Tidak ada data tersedia</p>
-      <p style={{ margin: 0, color: "#94a3b8", fontSize: 13 }}>Coba ubah filter atau router yang dipilih</p>
+    <div style={{ textAlign: "center", padding: "32px 24px" }}>
+      <div style={{ color: NS.text, fontSize: 14, fontWeight: 600 }}>Tidak ada data</div>
+      <div style={{ color: NS.label, fontSize: 13, marginTop: 4 }}>Coba ubah pencarian atau router yang dipilih.</div>
     </div>
   );
 }

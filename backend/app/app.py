@@ -3774,23 +3774,13 @@ def _cached_overview(kind: str, days: int, builder) -> Dict:
     return set_cache_value(_OVERVIEW_CACHE, key, {"success": True, **builder(days=days)}, OVERVIEW_CACHE_TTL_SECONDS)
 
 
-@app.get("/api/noc/isp")
-def api_noc_isp(days: int = Query(7, ge=1, le=365)):
-    """Catatan ISP: status terkini, uptime, jumlah & durasi down, dan daftar
-    insiden per ISP (entri Netwatch ber-host IP publik), dibaca dari riwayat SQLite."""
+@app.get("/api/noc/network")
+def api_noc_network(days: int = Query(7, ge=1, le=365)):
+    """Catatan jaringan: status terkini, uptime, jumlah & durasi down, dan daftar
+    insiden untuk ISP (Netwatch ber-host IP publik) dan perangkat LAN (AP, switch,
+    dll.), dari riwayat SQLite. Tiap entri punya `category` "isp" | "device"."""
     try:
-        return _cached_overview("isp", days, noc_history.get_isp_overview)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/noc/devices")
-def api_noc_devices(days: int = Query(7, ge=1, le=365)):
-    """Catatan perangkat LAN (AP, switch, dll. dari Netwatch): status terkini,
-    uptime, jumlah & durasi down, dan daftar insiden, dari riwayat SQLite."""
-    try:
-        return _cached_overview("devices", days, noc_history.get_device_overview)
+        return _cached_overview("network", days, noc_history.get_network_overview)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -4385,11 +4375,22 @@ class SPAStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
         from starlette.exceptions import HTTPException as _StarletteHTTPException
         try:
-            return await super().get_response(path, scope)
+            resp = await super().get_response(path, scope)
         except _StarletteHTTPException as exc:
-            if exc.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+            # File aset yang hilang (versi lama) harus tetap 404, jangan dibalas
+            # index.html — kalau tidak, browser mencoba menjalankan HTML sebagai JS.
+            if exc.status_code != 404 or path.startswith("assets/"):
+                raise
+            resp = await super().get_response("index.html", scope)
+            path = "index.html"
+        # index.html jangan di-cache browser: setelah build baru, browser harus
+        # langsung memakai daftar file terbaru. File di assets/ bernama hash,
+        # jadi aman di-cache lama.
+        if path in ("", ".", "index.html") or not os.path.splitext(path)[1]:
+            resp.headers["Cache-Control"] = "no-cache"
+        elif path.startswith("assets/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
 
 
 if FRONTEND_DIST.exists():

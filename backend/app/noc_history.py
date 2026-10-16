@@ -752,7 +752,10 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     return out
 
 
-ISP_OVERVIEW_MAX_INCIDENTS = 500
+# Insiden yang dikirim ke browser dibatasi PER KATEGORI (terbaru dulu): ribuan baris
+# cuma memberatkan transfer & render, dan tanpa pemisahan kategori, insiden ISP yang
+# jarang bisa tergeser oleh banyaknya insiden perangkat.
+NETWORK_MAX_INCIDENTS_PER_CATEGORY = 500
 
 
 def _is_isp_key(key: str) -> bool:
@@ -777,19 +780,19 @@ def _is_device_key(key: str) -> bool:
         return False
 
 
-def get_isp_overview(days: int = 7) -> Dict:
-    return _get_overview(days, _is_isp_key)
+def _category(key: str) -> Optional[str]:
+    if _is_isp_key(key):
+        return "isp"
+    if _is_device_key(key):
+        return "device"
+    return None
 
 
-def get_device_overview(days: int = 7) -> Dict:
-    return _get_overview(days, _is_device_key)
-
-
-def _get_overview(days: int, is_member) -> Dict:
-    """Ringkasan + daftar insiden entity perangkat (ISP atau perangkat LAN, sesuai
-    `is_member`) untuk `days` hari terakhir, plus cakupan pemantauan supaya angka
-    uptime tidak terbaca lebih pasti dari kenyataan (jam saat backend mati tidak
-    terekam)."""
+def get_network_overview(days: int = 7) -> Dict:
+    """Ringkasan + daftar insiden ISP dan perangkat LAN untuk `days` hari terakhir,
+    plus cakupan pemantauan supaya angka uptime tidak terbaca lebih pasti dari
+    kenyataan (jam saat backend mati tidak terekam). Tiap entity dan insiden diberi
+    `category` ("isp" | "device") supaya tampilan bisa menyaringnya."""
     init_db()
     now_dt = datetime.datetime.now()
     start_dt = now_dt - datetime.timedelta(days=days)
@@ -799,49 +802,64 @@ def _get_overview(days: int, is_member) -> Dict:
         # GROUP BY sekali jalan. Versi subquery-per-baris (WHERE id = (SELECT MAX(id) ...))
         # menelusuri tabel lagi untuk SETIAP baris -> kuadratik, ±5 dtk di 50 ribu baris.
         latest = conn.execute(
-            "SELECT e.entity_key, e.entity_name, e.state, e.started_at FROM noc_events e "
+            "SELECT e.entity_key, e.entity_name, e.state, e.started_at, e.ended_at FROM noc_events e "
             "JOIN (SELECT entity_key, MAX(id) AS mid FROM noc_events "
             "WHERE kind = 'device' GROUP BY entity_key) m ON e.id = m.mid"
         ).fetchall()
     finally:
         conn.close()
-    latest = [r for r in latest if is_member(r["entity_key"])]
+    latest = [r for r in latest if _category(r["entity_key"])]
 
     stats = {s["key"]: s for s in get_uptime_stats_range(start_dt, now_dt, kind="device")}
-    log = [x for x in get_downtime_log_range(start_dt, now_dt, kind="device", limit=50000)
-           if is_member(x["key"])]
+    log = [dict(x, category=_category(x["key"]))
+           for x in get_downtime_log_range(start_dt, now_dt, kind="device", limit=50000)
+           if _category(x["key"])]
     longest: Dict[str, int] = {}
     for x in log:
         longest[x["key"]] = max(longest.get(x["key"], 0), x["duration_seconds"])
 
-    isps = []
+    has_log = {x["key"] for x in log}
+    entities = []
     for r in latest:
         key = r["entity_key"]
         st = stats.get(key)
-        isps.append({
+        # Event terakhir sudah DITUTUP = entity tidak dilaporkan lagi (dihapus dari
+        # Netwatch / IP diganti). Itu bukan "down sekarang": tandai INACTIVE, dan
+        # sembunyikan kalau tak punya gangguan pada rentang ini.
+        inactive = r["ended_at"] is not None
+        if inactive and not st and key not in has_log:
+            continue
+        entities.append({
             "key": key,
+            "category": _category(key),
             "name": r["entity_name"],
             "location": key.split(":")[1],
             "host": key.rsplit(":", 1)[1],
-            "state": r["state"],
-            "state_since": r["started_at"],
+            "state": "INACTIVE" if inactive else r["state"],
+            "state_since": r["ended_at"] if inactive else r["started_at"],
             "uptime_pct": st["uptime_pct"] if st else 100.0,
             "incidents": st["incidents"] if st else 0,
             "downtime_seconds": st["downtime_seconds"] if st else 0,
             "mttr_seconds": st["mttr_seconds"] if st else None,
             "longest_seconds": longest.get(key, 0),
         })
-    isps.sort(key=lambda i: (i["location"].lower(), i["name"].lower()))
+    entities.sort(key=lambda e: (e["category"] != "isp", e["location"].lower(), e["name"].lower()))
+
     log.sort(key=lambda x: x["down_at"], reverse=True)
-    incident_total = len(log)
+    totals = {"isp": 0, "device": 0}
+    shown, per_cat = [], {"isp": 0, "device": 0}
+    for x in log:
+        totals[x["category"]] += 1
+        if per_cat[x["category"]] < NETWORK_MAX_INCIDENTS_PER_CATEGORY:
+            per_cat[x["category"]] += 1
+            shown.append(x)
     return {
         "days": days,
         "generated_at": now_dt.strftime(_FMT),
-        "isps": isps,
-        # Browser cukup menampilkan yang terbaru; ribuan baris cuma memberatkan
-        # transfer & render. Total sebenarnya dikirim terpisah.
-        "incident_total": incident_total,
-        "incidents": log[:ISP_OVERVIEW_MAX_INCIDENTS],
+        "min_incident_seconds": MIN_INCIDENT_SECONDS,
+        "entities": entities,
+        "incident_totals": totals,
+        "incidents": shown,
         "coverage": get_coverage(start_dt, now_dt),
     }
 

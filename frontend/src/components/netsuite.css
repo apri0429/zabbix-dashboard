@@ -1,0 +1,631 @@
+/* ─────────────────────────────────────────────────────────────
+   Tema NetSuite untuk seluruh aplikasi.
+   Dimuat SETELAH templateComponents.css supaya menimpa gaya lama
+   (kartu kaca, sudut bulat besar, gradien) dengan gaya NetSuite:
+   datar, sudut 3px, pita judul abu-biru, tabel zebra.
+   ───────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --ns-font: 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif;
+  --ns-text: #333333;
+  --ns-label: #666666;
+  --ns-link: #255599;
+  --ns-page: #e8edf4;
+  --ns-page-grad: linear-gradient(180deg, #dde5f0 0%, #e8edf4 320px, #eef2f7 100%);
+  --ns-top: #ffffff;
+  --ns-nav: #24385b;
+  /* Gradien header: biru tua → biru korporat, kalem tanpa ungu/neon. */
+  --ns-header-grad: linear-gradient(90deg, #14284d 0%, #1d3a6e 50%, #26508f 100%);
+  --ns-nav-hover: #33497a;
+  --ns-nav-active: #ffffff;
+  --ns-band: #dfe4eb;
+  --ns-band-text: #4d5f79;
+  --ns-col-head: #e5e5e5;
+  --ns-zebra: #f5f7fa;
+  --ns-hover: #e5eefa;
+  --ns-field: #cccccc;
+  --ns-primary: #2a5db0;
+  --ns-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  font-family: var(--ns-font);
+  color: var(--ns-text);
+  background: var(--ns-page);
+}
+
+html,
+body {
+  background: var(--ns-page);
+  color: var(--ns-text);
+  font-family: var(--ns-font);
+  font-size: 13px;
+  /* Angka selebar seragam supaya jam & nilai di tabel tidak bergeser. */
+  font-variant-numeric: tabular-nums;
+  /* "clip" (bukan "hidden" dari CSS lama) supaya header sticky tetap menempel. */
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* ── Kerangka halaman ── */
+.ns-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ns-page-grad) no-repeat var(--ns-page);
+  position: relative;
+}
+
+.ns-shell > .ns-main {
+  position: relative;
+  z-index: 1;
+}
+
+.ns-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 64px;
+  padding: 0 20px;
+  background: var(--ns-header-grad);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ns-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ns-brand img {
+  height: 48px;
+  width: auto;
+}
+
+.ns-brand__name {
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.ns-brand__name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.ns-user {
+  position: relative;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.ns-usertrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ns-usertrigger:hover,
+.ns-usertrigger[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ns-usertrigger__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.ns-usertrigger__name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ns-usertrigger__role {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ns-usermenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 200;
+  min-width: 160px;
+  background: #ffffff;
+  color: #1f2d3d;
+  border: 1px solid #d5dce6;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(15, 30, 55, 0.22);
+  overflow: hidden;
+}
+
+.ns-usermenu__who {
+  display: none;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e6ebf2;
+  line-height: 1.3;
+}
+
+.ns-usermenu__who b {
+  display: block;
+  font-size: 13px;
+}
+
+.ns-usermenu__who span {
+  font-size: 11px;
+  color: #6b7a90;
+}
+
+@media (max-width: 720px) {
+  .ns-usermenu__who {
+    display: block;
+  }
+}
+
+.ns-usermenu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #1f2d3d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ns-usermenu__item:hover {
+  background: #f1f5fb;
+}
+
+.ns-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #bcd3f5;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ns-link:hover {
+  text-decoration: underline;
+}
+
+/* Bar logo + bar menu menempel di atas saat halaman di-scroll. */
+.ns-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.ns-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 14px;
+  /* Gradien yang sama persis dengan bar logo supaya header terlihat satu kesatuan. */
+  background: var(--ns-header-grad);
+  overflow-x: auto;
+}
+
+.ns-nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  margin-top: 4px;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.ns-nav__item svg {
+  opacity: 0.75;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+/* Garis tipis di bawah menu yang muncul melebar dari tengah saat disorot. */
+.ns-nav__item::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: #9cc2ff;
+  transform: scaleX(0);
+  transition: transform 0.2s ease;
+}
+
+.ns-nav__item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.ns-nav__item:hover svg {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.ns-nav__item:hover::after {
+  transform: scaleX(1);
+}
+
+.ns-nav__item:focus-visible {
+  outline: 2px solid #9cc2ff;
+  outline-offset: -2px;
+}
+
+/* Menu aktif: tab terang yang menyambung ke isi halaman, dengan aksen emas
+   di atasnya (senada dengan logo) dan teks biru tua tegas. */
+.ns-nav__item.active {
+  background: var(--ns-page);
+  color: #16315f;
+  font-weight: 700;
+  box-shadow: inset 0 3px 0 #e0b04a;
+}
+
+.ns-nav__item.active svg {
+  opacity: 1;
+  color: #26508f;
+}
+
+.ns-nav__item.active:hover {
+  background: #ffffff;
+  color: #16315f;
+}
+
+.ns-nav__item.active:hover svg {
+  transform: none;
+}
+
+.ns-nav__item.active::after {
+  display: none;
+}
+
+.ns-nav__toggle {
+  display: none;
+}
+
+.ns-nav__toggle::after {
+  display: none;
+}
+
+.ns-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 18px 20px 32px;
+}
+
+@media (max-width: 720px) {
+  .ns-top {
+    padding: 0 12px;
+  }
+
+  .ns-top {
+    height: 56px;
+  }
+
+  .ns-brand img {
+    height: 40px;
+  }
+
+  .ns-brand__name {
+    font-size: 16px;
+    padding-left: 10px;
+  }
+
+  .ns-nav {
+    flex-direction: column;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .ns-nav__toggle {
+    display: flex;
+    margin-top: 0;
+    border-radius: 0;
+    justify-content: space-between;
+  }
+
+  .ns-nav__item {
+    margin-top: 0;
+    border-radius: 0;
+    padding: 0 16px;
+  }
+
+  .ns-nav:not(.open) .ns-nav__item:not(.ns-nav__toggle) {
+    display: none;
+  }
+
+  .ns-nav__item.active:not(.ns-nav__toggle),
+  .ns-nav__item.active:not(.ns-nav__toggle):hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    box-shadow: inset 3px 0 0 #e0b04a;
+  }
+
+  .ns-nav__item.active:not(.ns-nav__toggle) svg {
+    color: #ffffff;
+  }
+
+  .ns-main {
+    padding: 14px 12px 28px;
+  }
+}
+
+/* ── Footer ── */
+.ns-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 14px 20px 20px;
+  font-size: 12px;
+  color: var(--ns-label);
+  border-top: 1px solid #e3e6eb;
+}
+
+@media (max-width: 720px) {
+  /* Di HP profil cukup ikon; nama tampil di dropdown. */
+  .ns-usertrigger__text {
+    display: none;
+  }
+
+  .ns-usertrigger {
+    padding: 8px;
+  }
+
+  .ns-footer {
+    padding: 12px 12px 18px;
+    flex-direction: column;
+  }
+}
+
+/* ── Panel & kartu lama → panel NetSuite ── */
+.dashboard-card,
+.dashboard-panel,
+.noc-card {
+  border: none !important;
+  border-radius: 3px !important;
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+  box-shadow: var(--ns-shadow) !important;
+}
+
+.dashboard-stack__item,
+.dashboard-list__item {
+  border: none;
+  border-radius: 3px;
+  background: var(--ns-zebra);
+}
+
+.dashboard-content {
+  gap: 14px;
+}
+
+/* ── Tabel ── */
+.users-table-wrapper {
+  border: none;
+  border-radius: 3px;
+  background: #ffffff;
+  box-shadow: var(--ns-shadow);
+}
+
+.users-table th {
+  padding: 7px 12px;
+  border-bottom: none;
+  background: var(--ns-col-head);
+  color: var(--ns-label);
+  font-family: var(--ns-font);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.users-table td {
+  padding: 8px 12px;
+  border-bottom: none;
+  color: var(--ns-text);
+  font-size: 13px;
+}
+
+.users-table tbody tr:nth-child(even) {
+  background: var(--ns-zebra);
+}
+
+.users-table tbody tr:hover {
+  background: var(--ns-hover);
+}
+
+/* ── Popup ── */
+.dashboard-popup {
+  border: none;
+  border-radius: 3px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.dashboard-popup__header {
+  padding: 10px 14px;
+  background: var(--ns-band);
+  border-bottom: none;
+}
+
+.dashboard-popup__eyebrow {
+  color: var(--ns-label);
+  font-family: var(--ns-font);
+  font-size: 11px;
+}
+
+.dashboard-popup__title {
+  color: var(--ns-band-text);
+  font-size: 15px;
+}
+
+.dashboard-popup__close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #b2b2b2;
+  border-radius: 3px;
+  background: #e9e9e9;
+  color: var(--ns-text);
+}
+
+.dashboard-popup__close:hover {
+  transform: none;
+  background: #dcdcdc;
+  border-color: #999999;
+}
+
+.dashboard-popup__button {
+  border-radius: 3px;
+  padding: 6px 16px;
+  font-size: 13px;
+}
+
+.dashboard-popup__button:hover {
+  transform: none;
+}
+
+.dashboard-popup__button--primary {
+  background: var(--ns-primary);
+  box-shadow: none;
+}
+
+.dashboard-popup__button--primary:hover {
+  box-shadow: none;
+  background: #234f97;
+}
+
+.dashboard-popup__button--secondary {
+  border: 1px solid #b2b2b2;
+  background: #e9e9e9;
+  color: var(--ns-text);
+}
+
+/* ── Input & select ── */
+.dhcp-select,
+.dhcp-input,
+.lbw-select,
+.dash-dateinput {
+  border-radius: 3px !important;
+  border: 1px solid var(--ns-field) !important;
+  box-shadow: none !important;
+  font-family: var(--ns-font) !important;
+}
+
+/* Font monospace lama diganti font NetSuite di semua tempat. */
+[style*="IBM Plex Mono"] {
+  font-family: var(--ns-font) !important;
+}
+
+/* Titik "Live" berdenyut pelan di Dashboard. */
+.ns-live-dot {
+  animation: ns-live 2s ease-in-out infinite;
+}
+
+@keyframes ns-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Tombol tautan di pita judul panel (Lihat bandwidth, Detail, Lihat semua). */
+.ns-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 12px;
+  border: 1px solid #b9c6da;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ns-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 40, 77, 0.08);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ns-linkbtn svg {
+  transition: transform 0.15s ease;
+}
+
+.ns-linkbtn:hover {
+  background: var(--ns-primary);
+  border-color: var(--ns-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(42, 93, 176, 0.3);
+}
+
+.ns-linkbtn:hover svg {
+  transform: translateX(2px);
+}
+
+.ns-linkbtn:focus-visible {
+  outline: 2px solid var(--ns-primary);
+  outline-offset: 2px;
+}
+
+/* Tombol kembali ke atas, muncul di semua halaman saat di-scroll. */
+.ns-totop {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 150;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--ns-primary);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(20, 40, 77, 0.35);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.ns-totop:hover {
+  background: #1d4a92;
+  transform: translateY(-2px);
+}

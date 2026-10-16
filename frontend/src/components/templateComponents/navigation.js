@@ -3,18 +3,16 @@ import {
   BarChartSquare02,
   CpuChip01,
   Globe01,
-  Server01,
+  LineChartUp01,
   LogOut01,
-  Monitor01,
   Users01,
 } from '@untitledui/icons'
 
 export const defaultNavigationPath = '/dashboard'
 export const implementedNavigationPaths = [
   '/dashboard',
-  '/noc',
-  '/isp',
-  '/devices',
+  '/laporan',
+  '/catatan',
   '/user-active',
   '/live-bandwidth',
   '/mikrotik',
@@ -27,22 +25,17 @@ export const primaryNavigationItems = [
     icon: BarChartSquare02,
   },
   {
-    label: 'NOC Monitor',
-    href: '/noc',
-    icon: Monitor01,
+    label: 'Traffic Report',
+    href: '/laporan',
+    icon: LineChartUp01,
   },
   {
-    label: 'Catatan ISP',
-    href: '/isp',
+    label: 'Network Log',
+    href: '/catatan',
     icon: Globe01,
   },
   {
-    label: 'Catatan Perangkat',
-    href: '/devices',
-    icon: Server01,
-  },
-  {
-    label: 'User Active',
+    label: 'Active Users',
     href: '/user-active',
     icon: Users01,
   },
@@ -52,7 +45,7 @@ export const primaryNavigationItems = [
     icon: Activity,
   },
   {
-    label: 'Mikrotik',
+    label: 'MikroTik',
     href: '/mikrotik',
     icon: CpuChip01,
   },

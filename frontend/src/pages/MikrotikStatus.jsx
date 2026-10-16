@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API_BASE } from "../api";
+import { RefreshCw01 } from "@untitledui/icons";
+import { NS, PageHeader, Panel, Alert, btn, th, td, zebraRow, useIsMobile } from "../components/ns";
 
 const T = {
-  navy:     "#1a2a57",
-  navyMid:  "#2d4a8c",
+  navy:     "#24385b",
+  navyMid:  "#2a5db0",
   teal:     "#2a9d8f",
   coral:    "#e76f51",
   gold:     "#e9c46a",
@@ -16,17 +18,6 @@ const T = {
   surface:  "#ffffff",
   surfaceAlt:"rgba(248,249,250,0.95)",
 };
-
-function useBreakpoint() {
-  const get = () => ({ isMobile: window.innerWidth < 640 });
-  const [bp, setBp] = useState(() => typeof window !== "undefined" ? get() : { isMobile: false });
-  useEffect(() => {
-    const h = () => setBp(get());
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
-  }, []);
-  return bp;
-}
 
 /* ─── Helpers ─── */
 function formatBytes(bytes) {
@@ -52,121 +43,71 @@ function parseUptime(uptime) {
 }
 
 /* ─── Sub-components ─── */
-const OnlineBadge = ({ online }) => (
-  <span style={{
-    display: "inline-flex", alignItems: "center", gap: 5,
-    padding: "3px 10px", borderRadius: 99,
-    fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
-    color: online ? "#18786e" : "#b42318",
-    background: online ? "rgba(42,157,143,0.13)" : "rgba(231,111,81,0.12)",
-    border: `1px solid ${online ? "rgba(42,157,143,0.28)" : "rgba(231,111,81,0.28)"}`,
-  }}>
-    <span style={{ width: 5, height: 5, borderRadius: "50%", background: online ? "#18786e" : "#b42318", display: "inline-block" }} />
+const loadColor = (pct) => (pct > 85 ? NS.bad : pct > 65 ? NS.warn : NS.ok);
+
+const StatusText = ({ online }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: online ? NS.ok : NS.bad }}>
+    <span style={{ width: 8, height: 8, borderRadius: "50%", background: online ? NS.ok : NS.bad }} />
     {online ? "Online" : "Offline"}
   </span>
 );
 
-function CpuGauge({ value }) {
-  const color = value > 80 ? "#b42318" : value > 60 ? "#8a680f" : "#18786e";
-  const bg    = value > 80 ? "rgba(231,111,81,0.10)" : value > 60 ? "rgba(233,196,106,0.15)" : "rgba(42,157,143,0.08)";
+/* Bar pemakaian kecil: angka persen + batang berwarna sesuai beban. */
+const MiniBar = ({ pct, detail }) => {
+  const color = loadColor(pct);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>CPU Load</span>
-        <span style={{ fontSize: 18, fontWeight: 800, color, fontFamily: "'IBM Plex Mono',monospace", letterSpacing: "-0.02em" }}>{value}%</span>
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 60, height: 6, borderRadius: 3, background: NS.colHead, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: color, transition: "width 0.6s ease" }} />
+        </div>
+        <span style={{ minWidth: 36, textAlign: "right", fontWeight: 700, color }}>{pct}%</span>
       </div>
-      <div style={{ height: 7, borderRadius: 99, background: "rgba(26,42,87,0.07)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.min(value, 100)}%`, background: color, borderRadius: 99, transition: "width 0.6s ease" }} />
-      </div>
+      {detail && <div style={{ fontSize: 11.5, color: NS.label, marginTop: 3 }}>{detail}</div>}
     </div>
   );
-}
+};
 
-function MemBar({ used, total }) {
-  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
-  const color = pct > 85 ? "#b42318" : pct > 65 ? "#8a680f" : T.navyMid;
+/* Tampilan HP: satu blok per router, isi sama dengan baris tabel. */
+function RouterItem({ r, i }) {
+  const memPct = r.total_memory > 0 ? Math.round((r.used_memory / r.total_memory) * 100) : 0;
+  const meta = [
+    ["Uptime", r.online ? parseUptime(r.uptime).text : "–"],
+    ["Board", r.board_name || "–"],
+    ["RouterOS", r.version || "–"],
+  ];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Memory</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color, fontFamily: "'IBM Plex Mono',monospace" }}>
-          {formatBytes(used)} / {formatBytes(total)}
-        </span>
-      </div>
-      <div style={{ height: 7, borderRadius: 99, background: "rgba(26,42,87,0.07)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: color, borderRadius: 99, transition: "width 0.6s ease" }} />
-      </div>
-    </div>
-  );
-}
-
-function RouterCard({ router, isMobile }) {
-  const uptime = parseUptime(router.uptime);
-  return (
-    <div style={{
-      borderRadius: 16, border: `1px solid ${router.online ? T.border : "rgba(231,111,81,0.22)"}`,
-      background: T.surface, overflow: "hidden",
-      boxShadow: router.online ? "0 2px 8px rgba(26,42,87,0.07)" : "0 2px 8px rgba(231,111,81,0.08)",
-      opacity: router.online ? 1 : 0.82,
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: "14px 18px 12px",
-        background: router.online ? "rgba(26,42,87,0.03)" : "rgba(231,111,81,0.04)",
-        borderBottom: `1px solid ${T.border}`,
-        display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10,
-      }}>
+    <div style={{ padding: "12px 14px", background: i % 2 ? NS.zebra : NS.surface, borderTop: i ? `1px solid ${NS.colHead}` : "none" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: T.text, letterSpacing: "-0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {router.router_name}
-          </div>
-          <div style={{ fontSize: 11, color: T.muted, marginTop: 2, fontFamily: "'IBM Plex Mono',monospace" }}>
-            {router.router_host}
-          </div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{r.router_name}</div>
+          <div style={{ fontSize: 12, color: NS.label }}>{r.router_host}</div>
         </div>
-        <OnlineBadge online={router.online} />
+        <StatusText online={r.online} />
       </div>
-
-      {router.online ? (
-        <div style={{ padding: "14px 18px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <CpuGauge value={router.cpu_load} />
-          <MemBar used={router.used_memory} total={router.total_memory} />
-
-          {/* Info grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 2 }}>
-            <div style={{ padding: "10px 12px", borderRadius: 10, background: T.surfaceAlt, border: `1px solid ${T.border}` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Uptime</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: T.navy, fontFamily: "'IBM Plex Mono',monospace" }}>
-                {uptime.text}
-              </div>
+      {r.online ? (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: NS.label, textTransform: "uppercase", marginBottom: 4 }}>CPU</div>
+              <MiniBar pct={Number(r.cpu_load) || 0} />
             </div>
-            <div style={{ padding: "10px 12px", borderRadius: 10, background: T.surfaceAlt, border: `1px solid ${T.border}` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Board</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {router.board_name || "–"}
-              </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: NS.label, textTransform: "uppercase", marginBottom: 4 }}>Memory</div>
+              <MiniBar pct={memPct} detail={`${formatBytes(r.used_memory)} / ${formatBytes(r.total_memory)}`} />
             </div>
           </div>
-
-          {router.version && (
-            <div style={{ fontSize: 11, color: T.muted, fontFamily: "'IBM Plex Mono',monospace", textAlign: "right" }}>
-              RouterOS {router.version}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ padding: "18px 18px 20px", display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
-          <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="rgba(231,111,81,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <p style={{ margin: 0, fontSize: 12, color: "#b42318", fontWeight: 600, textAlign: "center" }}>Tidak dapat terhubung</p>
-          {router.error && (
-            <p style={{ margin: 0, fontSize: 11, color: T.muted, textAlign: "center", lineHeight: 1.5 }}>
-              {router.error.length > 90 ? router.error.slice(0, 90) + "…" : router.error}
-            </p>
-          )}
-        </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 10 }}>
+            {meta.map(([k, v]) => (
+              <div key={k} style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: NS.label }}>{k}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, overflowWrap: "anywhere" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : r.error && (
+        <div style={{ fontSize: 12, color: NS.label, marginTop: 6 }}>{r.error.length > 90 ? r.error.slice(0, 90) + "…" : r.error}</div>
       )}
     </div>
   );
@@ -174,7 +115,7 @@ function RouterCard({ router, isMobile }) {
 
 /* ─── Main Page ─── */
 export default function MikrotikStatus() {
-  const { isMobile } = useBreakpoint();
+  const isMobile = useIsMobile();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -192,7 +133,7 @@ export default function MikrotikStatus() {
       setLastUpdated(new Date());
       setCountdown(REFRESH_INTERVAL);
     } catch (err) {
-      setError(err?.response?.data?.detail || err?.message || "Gagal mengambil data.");
+      setError(err?.response?.data?.detail || err?.message || "Failed to fetch data.");
     } finally {
       setLoading(false);
     }
@@ -217,98 +158,77 @@ export default function MikrotikStatus() {
 
   const onlineCount  = data.filter(r => r.online).length;
   const offlineCount = data.filter(r => !r.online).length;
+  const onlineRouters = data.filter((r) => r.online);
+  const avgCpu = onlineRouters.length
+    ? Math.round(onlineRouters.reduce((sum, r) => sum + (Number(r.cpu_load) || 0), 0) / onlineRouters.length)
+    : 0;
+
+  const timeText = lastUpdated
+    ? lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : "—";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 14 : 20, width: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", fontFamily: NS.font, color: NS.text }}>
+      <PageHeader
+        title="MikroTik"
+        subtitle={`${data.length ? `${onlineCount}/${data.length} routers online${offlineCount ? ` · ${offlineCount} offline` : ""} · avg CPU ${avgCpu}% · ` : ""}${loading ? "updating…" : `updated ${timeText}`}`}
+        actions={
+          <button type="button" onClick={fetchStatus} disabled={loading} style={{ ...btn(false, loading), gap: 8, width: isMobile ? "100%" : "auto" }} title="Refresh now">
+            <RefreshCw01 width={14} height={14} />
+            {loading ? "Refreshing…" : `Refresh · auto in ${countdown}s`}
+          </button>
+        }
+      />
 
-      {/* Loading bar */}
-      {loading && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, zIndex: 9999, background: `linear-gradient(90deg,${T.navy},${T.navyMid},${T.teal})`, animation: "mt-progress 1.6s ease-in-out infinite", transformOrigin: "left center" }}>
-          <style>{`@keyframes mt-progress { 0%{transform:scaleX(0) translateX(0)} 50%{transform:scaleX(0.6) translateX(50%)} 100%{transform:scaleX(0) translateX(200%)} }`}</style>
-        </div>
-      )}
+      {error && <Alert tone="bad" title="Unable to load data">{error}</Alert>}
 
-      {/* Header panel — gaya NOC (dot status, judul + subjudul) */}
-      <div className="dashboard-panel" style={{ padding: isMobile ? 16 : 22 }}>
-        <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "space-between", flexDirection: isMobile ? "column" : "row", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-            <span style={{
-              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-              background: loading ? T.gold : offlineCount > 0 ? T.coral : T.teal,
-              boxShadow: `0 0 0 4px ${loading ? "rgba(233,196,106,0.18)" : offlineCount > 0 ? "rgba(231,111,81,0.18)" : "rgba(42,157,143,0.18)"}`,
-              animation: "mt-pulse 2s ease-in-out infinite",
-            }} />
-            <style>{`@keyframes mt-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.2)} }`}</style>
-            <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: T.text, letterSpacing: "-0.025em" }}>
-                Status MikroTik
-              </h2>
-              <p style={{ margin: "3px 0 0", fontSize: 12, color: T.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
-                {loading
-                  ? "memperbarui…"
-                  : `update ${lastUpdated ? lastUpdated.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}`}
-                {" "}· refresh otomatis tiap {REFRESH_INTERVAL}s
-              </p>
-            </div>
-          </div>
-
-          {/* Summary chips — pindah ke posisi tombol refresh yang lama */}
-          {data.length > 0 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(26,42,87,0.07)", border: `1px solid ${T.borderMid}`, color: T.navy }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.navy, display: "inline-block" }} />
-                {data.length} Router
-              </span>
-              {onlineCount > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(42,157,143,0.10)", border: "1px solid rgba(42,157,143,0.25)", color: "#18786e" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#18786e", display: "inline-block" }} />
-                  {onlineCount} Online
-                </span>
-              )}
-              {offlineCount > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700, background: "rgba(231,111,81,0.10)", border: "1px solid rgba(231,111,81,0.25)", color: "#b42318" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#b42318", display: "inline-block" }} />
-                  {offlineCount} Offline
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div style={{ padding: "12px 16px", borderRadius: 10, background: "rgba(231,111,81,0.08)", border: "1px solid rgba(231,111,81,0.22)", color: "#b42318", fontSize: 13, display: "flex", gap: 9, fontWeight: 500 }}>
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          {error}
-        </div>
-      )}
-
-      {/* Empty state */}
       {!loading && !error && data.length === 0 && (
-        <div className="dashboard-panel" style={{ padding: "48px 24px", textAlign: "center" }}>
-          <svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke="rgba(26,42,87,0.25)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 12px" }}>
-            <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
-            <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
-          </svg>
-          <p style={{ margin: 0, color: T.muted, fontSize: 13 }}>Tidak ada router yang terkonfigurasi.</p>
-          <p style={{ margin: "4px 0 0", color: T.muted, fontSize: 12 }}>Tambahkan konfigurasi MIKROTIK_x di file .env</p>
-        </div>
+        <Alert tone="info" title="No routers configured">
+          Add the MIKROTIK_x settings to the .env file.
+        </Alert>
       )}
 
-      {/* Router cards grid */}
       {data.length > 0 && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: isMobile ? 12 : 16,
-        }}>
-          {data.map((router) => (
-            <RouterCard key={router.router_id} router={router} isMobile={isMobile} />
-          ))}
-        </div>
+        <Panel title="Router Overview" right={`${onlineCount}/${data.length} online`}>
+          {isMobile ? data.map((r, i) => <RouterItem key={r.router_id} r={r} i={i} />) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+              <thead>
+                <tr>{["Router", "Status", "CPU", "Memory", "Uptime", "Board", "RouterOS"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {data.map((r, i) => {
+                  const memPct = r.total_memory > 0 ? Math.round((r.used_memory / r.total_memory) * 100) : 0;
+                  const dash = <span style={{ color: NS.muted }}>–</span>;
+                  return (
+                    <tr key={r.router_id} style={zebraRow(i, false)}>
+                      <td style={{ ...td, fontWeight: 600 }}>
+                        {r.router_name}
+                        <div style={{ fontSize: 12, color: NS.label, fontWeight: 400 }}>{r.router_host}</div>
+                      </td>
+                      <td style={td}>
+                        <StatusText online={r.online} />
+                        {!r.online && r.error && (
+                          <div style={{ fontSize: 11.5, color: NS.label, marginTop: 3, maxWidth: 220 }}>
+                            {r.error.length > 70 ? r.error.slice(0, 70) + "…" : r.error}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ ...td, minWidth: 150 }}>{r.online ? <MiniBar pct={Number(r.cpu_load) || 0} /> : dash}</td>
+                      <td style={{ ...td, minWidth: 170 }}>
+                        {r.online ? <MiniBar pct={memPct} detail={`${formatBytes(r.used_memory)} / ${formatBytes(r.total_memory)}`} /> : dash}
+                      </td>
+                      <td style={td}>{r.online ? parseUptime(r.uptime).text : "–"}</td>
+                      <td style={td}>{r.board_name || "–"}</td>
+                      <td style={td}>{r.version || "–"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          )}
+        </Panel>
       )}
     </div>
   );

@@ -13,17 +13,18 @@ import {
   Legend,
 } from "recharts";
 import { MarkerPin05 } from "@untitledui/icons";
+import { NS, Band, fieldStyle } from "./ns";
 
 // ─── Design Tokens ───────────────────────────────────────────────────────────
 const C = {
   surface:       "#ffffff",
   bg:            "#f0f4f9",
-  accent:        "#233971",
-  accentLight:   "#3d5ca8",
-  green:         "#00c875",
+  accent:        "#24385b",
+  accentLight:   "#2a5db0",
+  green:         "#2a5db0",
   greenBg:       "rgba(0,200,117,0.08)",
   greenBorder:   "rgba(0,200,117,0.22)",
-  orange:        "#f59e0b",
+  orange:        "#e08a2e",
   orangeBg:      "rgba(245,158,11,0.08)",
   orangeBorder:  "rgba(245,158,11,0.22)",
   border:        "rgba(35,57,113,0.09)",
@@ -31,13 +32,13 @@ const C = {
   textPrimary:   "#0d1f3c",
   textSecondary: "#3d5278",
   textMuted:     "#7a90b0",
-  textHint:      "#b0bdd0",
+  textHint:      "#8a8a8a",
 };
 
 const HOST_COLORS = [
-  "#233971", "#00c875", "#f59e0b", "#ef4444",
+  "#24385b", "#00c875", "#f59e0b", "#ef4444",
   "#6d28d9", "#0891b2", "#0f766e", "#b45309",
-  "#3d5ca8", "#9333ea", "#15803d", "#dc2626",
+  "#2a5db0", "#9333ea", "#15803d", "#dc2626",
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ const PillBtn = ({ active, onClick, children, activeColor = C.accent }) => (
       flexShrink: 0,
       display: "inline-flex", alignItems: "center", gap: 5,
       padding: "7px 13px",
-      borderRadius: 99,
+      borderRadius: 3,
       border: `1px solid ${active ? activeColor + "55" : C.border}`,
       background: active ? activeColor + "12" : C.surface,
       color: active ? activeColor : C.textMuted,
@@ -152,7 +153,7 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect, color = C.accent }
         display: "flex", alignItems: "center", gap: 8,
         width: "100%", textAlign: "left",
         padding: "8px 10px",
-        borderRadius: 10,
+        borderRadius: 3,
         border: `1px solid ${isActive ? color : "rgba(35,57,113,0.12)"}`,
         background: isActive ? `${color}12` : "rgba(35,57,113,0.03)",
         cursor: "pointer",
@@ -162,7 +163,7 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect, color = C.accent }
       }}
     >
       <span style={{
-        width: 22, height: 22, borderRadius: 7, flexShrink: 0,
+        width: 22, height: 22, borderRadius: 3, flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
         background: `${color}1c`, color,
       }}>
@@ -176,7 +177,7 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect, color = C.accent }
           {clean}
         </span>
         {avgDl !== null && (
-          <span style={{ fontSize: 9.5, fontWeight: 600, color: C.textMuted, fontFamily: "'IBM Plex Mono', monospace" }}>
+          <span style={{ fontSize: 9.5, fontWeight: 600, color: C.textMuted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>
             ↓ {Number(avgDl).toFixed(1)} M
           </span>
         )}
@@ -196,31 +197,17 @@ const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: "#0d1f3c",
-      border: "1px solid #1a3560",
-      borderRadius: 14,
-      padding: "10px 13px",
-      fontSize: 12,
-      minWidth: 160,
+      background: "#fff", borderRadius: 3, padding: "8px 12px", fontSize: 12, minWidth: 170,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.18)", fontFamily: NS.font,
     }}>
-      <div style={{
-        fontSize: 10, fontWeight: 700,
-        color: "#7a90b0", marginBottom: 8,
-        letterSpacing: "0.04em",
-      }}>
-        {fmtDateTime(label)}
-      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: NS.label, marginBottom: 6 }}>{fmtDateTime(label)}</div>
       {payload.map((p) =>
         p.name && !p.name.startsWith("__") ? (
-          <div key={p.dataKey} style={{
-            display: "flex", justifyContent: "space-between",
-            alignItems: "center", gap: 16, marginBottom: 4,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <Dot color={p.color} size={7} />
-              <span style={{ color: "#c8d8ee", fontWeight: 600 }}>{p.name}</span>
-            </div>
-            <span style={{ color: "#fff", fontWeight: 700 }}>{toMbps(p.value)}</span>
+          <div key={p.dataKey} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 2 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, color: NS.text }}>
+              <Dot color={p.color} size={8} /> {p.name}
+            </span>
+            <b style={{ color: NS.text }}>{toMbps(p.value)}</b>
           </div>
         ) : null
       )}
@@ -233,8 +220,7 @@ const PeakDot = ({ cx, cy, value, color, threshold }) => {
   if (!value || value < threshold) return null;
   return (
     <g>
-      <circle cx={cx} cy={cy} r={6} fill={color} opacity={0.15} />
-      <circle cx={cx} cy={cy} r={3.5} fill={color} stroke="#fff" strokeWidth={2} />
+      <circle cx={cx} cy={cy} r={3} fill={color} stroke="#fff" strokeWidth={1.5} />
     </g>
   );
 };
@@ -326,69 +312,10 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
   if (!hostList.length) {
     return (
       <div>
-        <div style={{
-          display: "flex", alignItems: "center",
-          justifyContent: "space-between", gap: 8, flexWrap: "wrap",
-          marginBottom: 20,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{
-              width: 42, height: 42, borderRadius: 12,
-              background: "rgba(35,57,113,0.08)",
-              border: "1px solid rgba(35,57,113,0.14)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
-            }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.02em" }}>
-                History Traffic
-              </div>
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-                Monitoring bandwidth real-time
-              </div>
-            </div>
-          </div>
-          <div style={{
-            fontSize: 11, fontWeight: 700, padding: "4px 10px",
-            borderRadius: 99, background: C.accent + "12",
-            color: C.accent, border: `1px solid ${C.accent}28`,
-          }}>
-            0 titik data
-          </div>
-        </div>
-
-        <div style={{
-          height: 220, display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center",
-          gap: 14, borderRadius: 16,
-          background: "rgba(35,57,113,0.03)",
-          border: "1px dashed rgba(35,57,113,0.15)",
-        }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: 16,
-            background: "rgba(35,57,113,0.08)",
-            border: "1px solid rgba(35,57,113,0.12)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
-              stroke={C.accent} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
-              style={{ opacity: 0.65 }}>
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary }}>
-              Belum ada data history traffic
-            </div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 5, maxWidth: 240 }}>
-              Pilih rentang tanggal dan klik Generate untuk memuat data.
-            </div>
-          </div>
+        <Band>History Traffic</Band>
+        <div style={{ padding: "32px 16px", textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: NS.text }}>Belum ada data history traffic</div>
+          <div style={{ fontSize: 12, color: NS.label, marginTop: 4 }}>Pilih rentang tanggal lalu klik Generate Report.</div>
         </div>
       </div>
     );
@@ -436,7 +363,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
       />
     ),
     grid: (
-      <CartesianGrid strokeDasharray="2 5" stroke="rgba(15,30,60,0.06)" vertical={false} />
+      <CartesianGrid stroke="#ececec" vertical={false} />
     ),
     tooltip: (
       <Tooltip
@@ -450,7 +377,7 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
         formatter={(val) => {
           if (!val || val.startsWith("__")) return null;
           return (
-            <span style={{ fontWeight: 700, color: val === "Download" ? C.green : C.orange }}>
+            <span style={{ fontWeight: 600, color: NS.text }}>
               {val}
             </span>
           );
@@ -461,205 +388,80 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
 
   return (
     <div>
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{
-        display: "flex", alignItems: "center",
-        justifyContent: "space-between", gap: 8, flexWrap: "wrap",
-        marginBottom: 20,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{
-            width: 42, height: 42, borderRadius: 12,
-            background: "rgba(35,57,113,0.08)",
-            border: "1px solid rgba(35,57,113,0.14)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, letterSpacing: "-0.02em" }}>
-              History Traffic
-            </div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-              Monitoring bandwidth real-time
-            </div>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, padding: "4px 10px",
-            borderRadius: 99, background: C.accent + "12",
-            color: C.accent, border: `1px solid ${C.accent}28`,
-          }}>
-            {chartData.length} titik data
-          </div>
-          {chartData.length > 0 && (
-            <div style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: "nowrap" }}>
-              {fmtDateTime(chartData[0]?.time)}
-              {" → "}
-              {fmtDateTime(chartData[chartData.length - 1]?.time)}
-            </div>
-          )}
-        </div>
-      </div>
+      <Band right={chartData.length > 0
+        ? `${chartData.length} titik data · ${fmtDateTime(chartData[0]?.time)} → ${fmtDateTime(chartData[chartData.length - 1]?.time)}`
+        : `${chartData.length} titik data`}>
+        History Traffic
+      </Band>
+      <div style={{ padding: "14px 16px" }}>
+      {/* ── Kontrol: router, mode grafik, seri ── */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end", marginBottom: 14 }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 240, flex: "0 1 320px" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: NS.label, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            Router / ISP
+          </span>
+          <select value={activeKey || ""} onChange={(e) => setSelectedHost(e.target.value)} style={fieldStyle}>
+            {hostList.map((h) => <option key={h} value={h}>{shortLabel(h)}</option>)}
+          </select>
+        </label>
 
-      {/* ── Router Selector ────────────────────────────────────── */}
-      {hostList.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <div style={{
-              fontSize: 10, fontWeight: 700, color: C.accent,
-              textTransform: "uppercase", letterSpacing: "0.08em",
-            }}>
-              Pilih Router
-            </div>
-            <div style={{
-              fontSize: 9, fontWeight: 700, padding: "2px 8px",
-              borderRadius: 99, background: C.accent + "12",
-              color: C.accent, border: `1px solid ${C.accent}28`,
-            }}>
-              {hostList.length} device
-            </div>
-          </div>
-          <div style={{
-            display: isDesktop ? "grid" : "flex",
-            gridTemplateColumns: isDesktop ? "repeat(auto-fit, minmax(150px, 1fr))" : undefined,
-            gap: 8,
-            flexWrap: isDesktop ? undefined : "nowrap",
-            overflowX: isDesktop ? "visible" : "auto",
-            WebkitOverflowScrolling: "touch",
-            scrollbarWidth: "none",
-            msOverflowStyle: "none",
-            paddingBottom: isDesktop ? 0 : 4,
-            width: "100%",
-            minWidth: 0,
-          }}>
-            {hostList.map((host, i) => {
-              const summaryRow = summaryRows.find((s) => s.label === host);
-              const avg = summaryRow
-                ? (+summaryRow.avg_download || null)
-                : (() => {
-                    const r = grouped[host] || [];
-                    const vals = r.map((x) => +x.download || +x.rx || +x.avg_download || 0);
-                    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-                  })();
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: NS.label, textTransform: "uppercase", letterSpacing: "0.03em" }}>Tampilan</span>
+          <div style={{ display: "inline-flex" }}>
+            {[["smooth", "Halus"], ["detail", "Detail"]].map(([k, label], i) => {
+              const on = chartMode === k;
               return (
-                <div key={host} style={{
-                  flex: isDesktop ? undefined : "0 0 150px",
-                  minWidth: 0,
-                }}>
-                  <RouterChip
-                    host={host}
-                    index={i}
-                    isActive={host === activeKey}
-                    avgDl={avg}
-                    onSelect={setSelectedHost}
-                    color={hostColorMap[host]}
-                  />
-                </div>
+                <button key={k} onClick={() => setChartMode(k)} style={{
+                  height: 30, padding: "0 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: NS.font,
+                  border: `1px solid ${on ? NS.primary : NS.field}`, marginLeft: i ? -1 : 0, position: "relative", zIndex: on ? 1 : 0,
+                  borderRadius: i ? "0 3px 3px 0" : "3px 0 0 3px",
+                  background: on ? NS.hover : NS.surface, color: on ? NS.primary : NS.text,
+                }}>{label}</button>
               );
             })}
           </div>
         </div>
-      )}
 
-      {/* ── Divider ─────────────────────────────────────────────── */}
-      <div style={{
-        height: 1,
-        background: "linear-gradient(90deg, rgba(35,57,113,0.18) 0%, rgba(35,57,113,0.06) 100%)",
-        marginBottom: 14,
-        borderRadius: 99,
-      }} />
-
-      {/* ── Metric Strip ───────────────────────────────────────── */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
-        padding: "8px 12px", borderRadius: 10, marginBottom: 12,
-        background: "rgba(35,57,113,0.03)", border: `1px solid ${C.border}`,
-      }}>
-        <MetricCard label="Peak DL" value={peakDl} color={C.green} />
-        <MetricCard label="Peak UL" value={peakUl} color={C.orange} />
-        <MetricCard label="Avg DL"  value={avgDl}  color={C.green} />
-        <MetricCard label="Avg UL"  value={avgUl}  color={C.orange} />
+        <div style={{ display: "flex", gap: 16, alignItems: "center", height: 30 }}>
+          {[["Download", showDl, setShowDl, C.green], ["Upload", showUl, setShowUl, C.orange]].map(([label, on, set, col]) => (
+            <label key={label} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", color: NS.text }}>
+              <input type="checkbox" checked={on} onChange={() => set((v) => !v)} style={{ accentColor: col, width: 15, height: 15 }} />
+              <span style={{ width: 14, height: 3, background: col, borderRadius: 2 }} />
+              {label}
+            </label>
+          ))}
+        </div>
       </div>
 
-      {/* ── Toggle Controls ────────────────────────────────────── */}
+      {/* ── Ringkasan angka ── */}
       <div style={{
-        display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14,
+        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 1,
+        background: NS.colHead, borderRadius: 3, overflow: "hidden", marginBottom: 14,
       }}>
-        <PillBtn active={chartMode === "smooth"} onClick={() => setChartMode("smooth")}>
-          ≋ Smooth
-        </PillBtn>
-        <PillBtn active={chartMode === "detail"} onClick={() => setChartMode("detail")}>
-          ⌇ Detail
-        </PillBtn>
-        <PillBtn active={showDl} onClick={() => setShowDl((v) => !v)} activeColor={C.green}>
-          <Dot color={C.green} size={7} /> Download
-        </PillBtn>
-        <PillBtn active={showUl} onClick={() => setShowUl((v) => !v)} activeColor={C.orange}>
-          <Dot color={C.orange} size={7} /> Upload
-        </PillBtn>
+        {[["Peak download", peakDl, C.green], ["Peak upload", peakUl, C.orange], ["Rata-rata download", avgDl, C.green], ["Rata-rata upload", avgUl, C.orange]].map(([label, v, col]) => (
+          <div key={label} style={{ background: NS.zebra, padding: "8px 12px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: NS.label, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: col, marginTop: 2 }}>
+              {Number(v || 0).toFixed(1)} <span style={{ fontSize: 12, fontWeight: 600, color: NS.label }}>Mbps</span>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* ── Chart ──────────────────────────────────────────────── */}
-      <div style={{
-        borderRadius: 20,
-        border: `1px solid ${C.border}`,
-        background: "#fafcff",
-        padding: "16px 8px 10px",
-        overflow: "hidden",
-        position: "relative",
-      }}>
+      {/* ── Grafik ── */}
+      <div style={{ overflow: "hidden", position: "relative" }}>
         {chartMode === "smooth" ? (
-          <ResponsiveContainer width="100%" height={420}>
+          <ResponsiveContainer width="100%" height={380}>
             <AreaChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 6 }}>
               <defs>
-                {/* ── Fill utama Download (tipis, natural) ── */}
                 <linearGradient id="gradDl" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor={C.green} stopOpacity={0.30} />
-                  <stop offset="70%"  stopColor={C.green} stopOpacity={0.06} />
-                  <stop offset="100%" stopColor={C.green} stopOpacity={0.00} />
+                  <stop offset="0%"   stopColor={C.green} stopOpacity={0.18} />
+                  <stop offset="100%" stopColor={C.green} stopOpacity={0.01} />
                 </linearGradient>
-
-                {/* ── Fill utama Upload (tipis, natural) ── */}
                 <linearGradient id="gradUl" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor={C.orange} stopOpacity={0.22} />
-                  <stop offset="70%"  stopColor={C.orange} stopOpacity={0.05} />
-                  <stop offset="100%" stopColor={C.orange} stopOpacity={0.00} />
+                  <stop offset="0%"   stopColor={C.orange} stopOpacity={0.14} />
+                  <stop offset="100%" stopColor={C.orange} stopOpacity={0.01} />
                 </linearGradient>
-
-                {/*
-                  ── GLOW FILL Download ──
-                  Solid penuh dari atas ke bawah, makin bawah makin fade.
-                  Mirip seperti referensi gambar: area terisi dari garis ke sumbu X.
-                  Di-blur via SVG filter supaya tepinya soft/mblur.
-                */}
-                <linearGradient id="gradDlGlow" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor={C.green} stopOpacity={0.75} />
-                  <stop offset="35%"  stopColor={C.green} stopOpacity={0.50} />
-                  <stop offset="70%"  stopColor={C.green} stopOpacity={0.25} />
-                  <stop offset="100%" stopColor={C.green} stopOpacity={0.05} />
-                </linearGradient>
-
-                {/* ── GLOW FILL Upload ── */}
-                <linearGradient id="gradUlGlow" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor={C.orange} stopOpacity={0.70} />
-                  <stop offset="35%"  stopColor={C.orange} stopOpacity={0.45} />
-                  <stop offset="70%"  stopColor={C.orange} stopOpacity={0.22} />
-                  <stop offset="100%" stopColor={C.orange} stopOpacity={0.05} />
-                </linearGradient>
-
-                {/* SVG filter blur — dipakai oleh layer glow shadow */}
-                <filter id="blurGreen" x="-8%" y="-8%" width="116%" height="140%">
-                  <feGaussianBlur stdDeviation="9" />
-                </filter>
-                <filter id="blurOrange" x="-8%" y="-8%" width="116%" height="140%">
-                  <feGaussianBlur stdDeviation="9" />
-                </filter>
               </defs>
 
               {commonAxis.grid}
@@ -668,75 +470,26 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
               {commonAxis.tooltip}
               {commonAxis.legend}
 
-              {/*
-                ─────────────────────────────────────────────
-                LAYER 1 — GLOW SHADOW (di belakang)
-                Render duluan supaya layer utama menimpa di atasnya.
-                - fill tebal + blur → efek area berpendar ke bawah
-                - legendType="none" → tidak muncul di legend
-                - stroke="none" → tidak ada garis tepi
-                - isAnimationActive={false} → tidak animasi sendiri
-                ─────────────────────────────────────────────
-              */}
-              {showDl && (
-                <Area
-                  type="monotoneX"
-                  dataKey="download"
-                  name="__glowDl__"
-                  stroke="none"
-                  strokeWidth={0}
-                  fill="url(#gradDlGlow)"
-                  fillOpacity={1}
-                  dot={false}
-                  activeDot={false}
-                  legendType="none"
-                  isAnimationActive={false}
-                  style={{ filter: "url(#blurGreen)" }}
-                />
-              )}
-              {showUl && (
-                <Area
-                  type="monotoneX"
-                  dataKey="upload"
-                  name="__glowUl__"
-                  stroke="none"
-                  strokeWidth={0}
-                  fill="url(#gradUlGlow)"
-                  fillOpacity={1}
-                  dot={false}
-                  activeDot={false}
-                  legendType="none"
-                  isAnimationActive={false}
-                  style={{ filter: "url(#blurOrange)" }}
-                />
-              )}
-
-              {/*
-                ─────────────────────────────────────────────
-                LAYER 2 — Area utama (di depan, tajam)
-                Garis sharp di atas + fill tipis di bawahnya.
-                ─────────────────────────────────────────────
-              */}
               {showDl && (
                 <Area
                   type="monotoneX" dataKey="download" name="Download"
-                  stroke={C.green} strokeWidth={2.5} fill="url(#gradDl)"
+                  stroke={C.green} strokeWidth={1.8} fill="url(#gradDl)"
                   dot={<PeakDot color={C.green} threshold={peakThreshold} />}
-                  activeDot={{ r: 5, fill: C.green, stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: C.green, stroke: "#fff", strokeWidth: 2 }}
                 />
               )}
               {showUl && (
                 <Area
                   type="monotoneX" dataKey="upload" name="Upload"
-                  stroke={C.orange} strokeWidth={2.2} fill="url(#gradUl)"
+                  stroke={C.orange} strokeWidth={1.8} fill="url(#gradUl)"
                   dot={<PeakDot color={C.orange} threshold={peakThreshold} />}
-                  activeDot={{ r: 5, fill: C.orange, stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: C.orange, stroke: "#fff", strokeWidth: 2 }}
                 />
               )}
             </AreaChart>
           </ResponsiveContainer>
         ) : (
-          <ResponsiveContainer width="100%" height={420}>
+          <ResponsiveContainer width="100%" height={380}>
             <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 6 }}>
               {commonAxis.grid}
               {commonAxis.xAxis}
@@ -747,55 +500,24 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
               {showDl && (
                 <Line
                   type="linear" dataKey="download" name="Download"
-                  stroke={C.green} strokeWidth={2.2}
+                  stroke={C.green} strokeWidth={1.6}
                   dot={<PeakDot color={C.green} threshold={peakThreshold} />}
-                  activeDot={{ r: 5, fill: C.green, stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: C.green, stroke: "#fff", strokeWidth: 2 }}
                 />
               )}
               {showUl && (
                 <Line
                   type="linear" dataKey="upload" name="Upload"
-                  stroke={C.orange} strokeWidth={2}
+                  stroke={C.orange} strokeWidth={1.6}
                   dot={<PeakDot color={C.orange} threshold={peakThreshold} />}
-                  activeDot={{ r: 5, fill: C.orange, stroke: "#fff", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: C.orange, stroke: "#fff", strokeWidth: 2 }}
                 />
               )}
             </LineChart>
           </ResponsiveContainer>
         )}
       </div>
-
-      {chartData.length > 0 && (
-        <div style={{
-          marginTop: 24,
-          padding: "10px 12px",
-          borderRadius: 12,
-          background: "rgba(35,57,113,0.05)",
-          border: `1px solid ${C.accent}22`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          flexWrap: "wrap",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <Dot color={activeColor} size={7} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary }}>
-              Periode data
-            </span>
-          </div>
-          <span style={{
-            fontSize: 11,
-            color: C.textPrimary,
-            fontWeight: 600,
-            textAlign: "right",
-          }}>
-            {dayjs(chartData[0]?.time).isValid() ? dayjs(chartData[0]?.time).format("DD MMMM YYYY HH:mm") : chartData[0]?.time}
-            {" - "}
-            {dayjs(chartData[chartData.length - 1]?.time).isValid() ? dayjs(chartData[chartData.length - 1]?.time).format("DD MMMM YYYY HH:mm") : chartData[chartData.length - 1]?.time}
-          </span>
-        </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -803,15 +525,13 @@ const TrafficChart = ({ rows = [], summaryRows = [], historyMeta = null }) => {
 // ─── Card Wrapper ─────────────────────────────────────────────────────────────
 const Card = ({ children, style }) => (
   <div style={{
-    background: "linear-gradient(180deg, #ffffff 0%, #fafcff 100%)",
-    border: "1px solid rgba(35,57,113,0.18)",
-    borderRadius: 20,
-    padding: "20px 16px",
+    background: NS.surface,
+    borderRadius: 3,
     overflow: "hidden",
     minWidth: 0,
     maxWidth: "100%",
     boxSizing: "border-box",
-    boxShadow: "0 0 0 1px rgba(229,231,235,0.5),0 4px 6px -1px rgba(35,57,113,0.08),0 20px 40px -8px rgba(0,0,0,0.09)",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
     ...style,
   }}>
     {children}

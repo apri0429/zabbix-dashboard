@@ -9,6 +9,7 @@ import {
   Download04, Globe05, SearchMd, Send01,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
+import { NS, PageHeader, Kpi, BandTitle, btn } from "../components/ns";
 
 /* ─── Palet warna ───
    LIGHT dipakai saat NOC ditempel di dashboard biasa. WALL dipakai khusus mode
@@ -17,7 +18,7 @@ function buildPalette(dark) {
   if (!dark) {
     return {
       dark: false,
-      navy: "#1a2a57", navyMid: "#2d4a8c", teal: "#2a9d8f", coral: "#e76f51",
+      navy: "#24385b", navyMid: "#2a5db0", teal: "#2a9d8f", coral: "#e76f51",
       text: "#0f2035", textSoft: "#425575", muted: "#5a6b88",
       border: "rgba(26,42,87,0.10)", borderStrong: "rgba(26,42,87,0.13)",
       surface: "#ffffff", surfaceAlt: "rgba(248,249,250,0.95)",
@@ -45,7 +46,7 @@ function buildPalette(dark) {
     border: "rgba(33,76,154,0.12)", borderStrong: "rgba(33,76,154,0.18)",
     surface: "#ffffff", surfaceAlt: "#f7faff",
     panelBg: "rgba(255,255,255,0.94)",
-    pageBg: "linear-gradient(135deg, #f6fbff 0%, #eef6ff 45%, #f8fbff 100%)",
+    pageBg: "#f6f7f9",
     mutedAccent: "#d9e4f4",
     UP: "#0b8f70", WARN: "#b77905", DOWN: "#d92d20", UNKNOWN: "#667085",
     dotGlow: (c) => `0 0 0 4px ${c}20, 0 8px 18px -10px ${c}`,
@@ -81,10 +82,8 @@ const shortLabel = (s = "") => s.replace(/Mikrotik\s*/i, "").replace(" - ", " / 
    dijatah warna berikutnya dari palet secara berurutan (first-seen), dicache
    per site — jadi selama jumlah site <= panjang palet, gak ada dua site yang
    kebagian warna sama. */
-const SITE_PALETTE = [
-  "#2563eb", "#7c3aed", "#0d9488", "#c2410c", "#be185d",
-  "#4f46e5", "#0891b2", "#a16207", "#65a30d", "#9333ea",
-];
+// Semua lokasi memakai satu warna netral supaya seragam dengan halaman lain.
+const SITE_PALETTE = ["#2a5db0"];
 const _siteColorAssigned = new Map();
 function siteColor(site) {
   const key = String(site || "");
@@ -270,7 +269,7 @@ const StatePill = ({ state, size = "sm", pal }) => {
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 3,
       fontSize: fs, fontWeight: 800, letterSpacing: "0.05em", color: m.color,
-      background: m.bg, borderRadius: 6, padding: pad, flexShrink: 0, whiteSpace: "nowrap",
+      background: m.bg, borderRadius: 3, padding: pad, flexShrink: 0, whiteSpace: "nowrap",
     }}><Icon width={isz} height={isz} />{m.label}</span>
   );
 };
@@ -278,52 +277,29 @@ const StatePill = ({ state, size = "sm", pal }) => {
 const Metric = ({ label, value, tone, pal }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
     <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", color: pal.muted, textTransform: "uppercase" }}>{label}</span>
-    <span style={{ fontSize: 11.5, fontWeight: 700, color: tone || pal.text, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</span>
+    <span style={{ fontSize: 11.5, fontWeight: 700, color: tone || pal.text, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>{value}</span>
   </div>
 );
 
 /* ─── Counter tile ─── */
-const Counter = ({ label, value, color, muted, fs, pal, Icon }) => {
-  const iconColor = muted ? pal.muted : color;
-  return (
-    <div className="noc-counter" style={{
-      background: pal.surface, border: `1px solid ${pal.borderStrong}`,
-      borderRadius: 12, padding: fs ? "14px 18px" : "10px 14px",
-      display: "flex", alignItems: "center", gap: fs ? 14 : 10,
-    }}>
-      {Icon && (
-        <span style={{
-          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-          width: fs ? 44 : 34, height: fs ? 44 : 34, borderRadius: 10,
-          background: `${iconColor}1c`, color: iconColor,
-        }}>
-          <Icon width={fs ? 22 : 17} height={fs ? 22 : 17} />
-        </span>
-      )}
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: fs ? 11.5 : 10, fontWeight: 700, letterSpacing: "0.09em", color: pal.muted, textTransform: "uppercase" }}>{label}</div>
-        <div style={{ fontSize: fs ? 32 : 24, fontWeight: 800, color: muted ? pal.textSoft : color, lineHeight: 1.15, fontFamily: "'IBM Plex Mono', monospace" }}>
-          <span key={String(value)} className="noc-pop" style={{ display: "inline-block" }}>{value}</span>
-        </div>
-      </div>
-    </div>
-  );
-};
+const Counter = ({ label, value, color, muted, Icon }) => (
+  <Kpi
+    label={label}
+    value={value}
+    color={muted ? NS.label : color}
+    icon={Icon ? <Icon width={18} height={18} /> : null}
+  />
+);
 
 /* ─── Section header ─── */
-const SectionHead = ({ title, sub, right, fs, pal, stripe }) => (
+const SectionHead = ({ title, sub, right }) => (
   <div style={{
-    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-    marginBottom: fs ? 16 : 14, paddingBottom: fs ? 10 : 0,
-    borderBottom: fs && stripe ? `2px solid ${stripe}55` : undefined,
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+    margin: "-18px -18px 12px", padding: "7px 12px", background: NS.band, flexShrink: 0,
   }}>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-      {fs && stripe && <span style={{ width: 7, height: 7, borderRadius: "50%", background: stripe, flexShrink: 0 }} />}
-      <h3 style={{
-        margin: 0, fontSize: fs ? 15 : 13, fontWeight: 800, color: pal.text,
-        letterSpacing: fs ? "0.06em" : "-0.01em", textTransform: fs ? "uppercase" : "none",
-      }}>{title}</h3>
-      {sub != null && <span style={{ fontSize: fs ? 12 : 11, color: pal.muted }}>{sub}</span>}
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
+      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NS.bandText }}><BandTitle>{title}</BandTitle></h3>
+      {sub != null && <span style={{ fontSize: 12, color: NS.label }}>{sub}</span>}
     </div>
     {right}
   </div>
@@ -338,7 +314,7 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
     <div className={`noc-card${s.state === "DOWN" ? " noc-alarm" : ""}`} style={{
       background: "transparent",
       border: `1.5px solid ${sc}66`,
-      borderRadius: 9,
+      borderRadius: 3,
       alignSelf: "stretch",
       padding: "8px 9px", display: "flex", flexDirection: "column", gap: 7,
       animationDelay: `${Math.min(idx, 12) * 28}ms`, minHeight: 0, overflow: "hidden",
@@ -346,7 +322,7 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           <span style={{
-            width: 19, height: 19, borderRadius: 6, flexShrink: 0,
+            width: 19, height: 19, borderRadius: 3, flexShrink: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
             background: `${sc}1c`,
           }}>
@@ -361,7 +337,7 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
 
       <div style={{
         display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0,
-        background: pal.surfaceAlt, border: `1px solid ${pal.border}`, borderRadius: 7, padding: "5px 3px",
+        background: pal.surfaceAlt, border: `1px solid ${pal.border}`, borderRadius: 3, padding: "5px 3px",
       }}>
         <div style={{ borderRight: `1px dashed ${pal.border}`, padding: "0 6px" }}>
           <Metric label="Latency" value={s.latency_ms == null ? "–" : `${s.latency_ms}ms`} pal={pal} />
@@ -375,8 +351,8 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 10.5, color: pal.muted }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>↓ {s.in_mbps == null ? "–" : `${s.in_mbps}M`}</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>↑ {s.out_mbps == null ? "–" : `${s.out_mbps}M`}</span>
+        <span style={{ fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>↓ {s.in_mbps == null ? "–" : `${s.in_mbps}M`}</span>
+        <span style={{ fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>↑ {s.out_mbps == null ? "–" : `${s.out_mbps}M`}</span>
         <span title="Tren latency ±2 jam" style={{ marginLeft: "auto", display: "flex", alignItems: "center" }}>
           <Sparkline points={trend} color={meta.color} />
         </span>
@@ -410,7 +386,7 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
       padding: wallCompact ? "8px 9px" : compact ? "6px 8px" : "8px 9px",
       background: "transparent",
       border: `1.5px solid ${sc}66`,
-      borderRadius: 8,
+      borderRadius: 3,
       alignSelf: "stretch",
       minWidth: 0, minHeight: 0, overflow: "hidden",
       flexShrink: 0,
@@ -419,10 +395,12 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
       <span style={{
         width: wallCompact ? 30 : compact ? 24 : 28,
         height: wallCompact ? 30 : compact ? 24 : 28,
-        borderRadius: 7,
+        borderRadius: 3,
         flexShrink: 0,
-        display: "flex", alignItems: "center", justifyContent: "center", color: c,
-        background: `${sc}1c`,
+        // Ikon netral; hanya merah kalau perangkat sedang down.
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: d.state === "DOWN" ? NS.bad : NS.bandText,
+        background: d.state === "DOWN" ? NS.badBg : NS.zebra,
       }}>
         <Icon width={wallCompact ? 17 : compact ? 14 : 16} height={wallCompact ? 17 : compact ? 14 : 16} />
       </span>
@@ -435,7 +413,7 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
           <StatePill state={d.state} pal={pal} />
         </div>
 
-        <span style={{ fontSize: wallCompact ? 11 : 10, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace", overflowWrap: "anywhere", display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: wallCompact ? 11 : 10, color: pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", overflowWrap: "anywhere", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span>{showSite ? `${shortLabel(d.router_name || "Lainnya")} · ${tp.label}` : `${tp.label} · ${d.host || "-"}`}</span>
           {d.state === "DOWN" && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: pal.DOWN, fontWeight: 800 }}>
@@ -455,7 +433,7 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
         </span>
 
         {showHost && (
-          <span style={{ fontSize: 10, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace", overflowWrap: "anywhere" }}>
+          <span style={{ fontSize: 10, color: pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", overflowWrap: "anywhere" }}>
             hostname: {d.dhcp_name}
           </span>
         )}
@@ -471,7 +449,10 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
 };
 
 /* ═══════════════════════════════════════════ */
-export default function NocView() {
+// mode "full"    = halaman NOC lama (tidak lagi ada di menu).
+// mode "devices" = hanya panel Perangkat/Access Point + modal laporan, untuk Dashboard.
+// reportSignal   = angka yang naik tiap kali tombol "Laporan Mingguan" di Dashboard diklik.
+export default function NocView({ mode = "full", reportSignal = 0 }) {
   const { isMobile, isNarrow } = useBreakpoint();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -502,6 +483,19 @@ export default function NocView() {
   const [reportBusy, setReportBusy] = useState(false);
   const [reportErr, setReportErr] = useState("");
   const [reportResult, setReportResult] = useState(null);
+
+  // Esc menutup popup yang sedang terbuka (laporan dikunci selagi diproses).
+  useEffect(() => {
+    if (!showHistory && !showStats && !showReport) return;
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      if (showReport) { if (!reportBusy) setShowReport(false); }
+      else if (showStats) setShowStats(false);
+      else setShowHistory(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showHistory, showStats, showReport, reportBusy]);
   const [deviceStatusFilter, setDeviceStatusFilter] = useState("ALL");
   const [deviceSiteFilter, setDeviceSiteFilter] = useState("ALL");
 
@@ -547,6 +541,11 @@ export default function NocView() {
       setStatsErr(err?.response?.data?.detail || err?.message || "Gagal memuat statistik");
     }
   };
+
+  useEffect(() => {
+    if (reportSignal > 0) openReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportSignal]);
 
   const openReport = () => {
     setShowReport(true);
@@ -813,49 +812,28 @@ export default function NocView() {
         background: "transparent", padding: 0, alignContent: "start",
       };
 
-  const btnStyle = {
-    background: isFs ? "rgba(255,255,255,0.86)" : pal.surface, color: pal.navy,
-    border: `1px solid ${pal.borderStrong}`,
-    borderRadius: 9, padding: "8px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
-    fontFamily: "inherit", whiteSpace: "nowrap",
-    boxShadow: isFs ? "0 10px 24px -18px rgba(33,76,154,0.70)" : undefined,
-  };
-  const tintBtnStyle = (color) => ({
-    ...btnStyle,
-    background: `${color}12`, color,
-    border: `1px solid ${color}55`,
-  });
+  const btnStyle = btn(false);
+  const tintBtnStyle = () => btn(false);
   const EXCEL_GREEN = "#1d6f42";
   const RIWAYAT_BLUE = "#2563eb";
   const KEANDALAN_VIOLET = "#7c3aed";
   const excelBtnStyle = tintBtnStyle(EXCEL_GREEN);
   const riwayatBtnStyle = tintBtnStyle(RIWAYAT_BLUE);
   const keandalanBtnStyle = tintBtnStyle(KEANDALAN_VIOLET);
-  const filterChip = (active, color = pal.navy) => ({
-    border: `1px solid ${active ? color : pal.borderStrong}`,
-    background: active ? `${color}14` : pal.surfaceAlt,
-    color: active ? color : pal.textSoft,
-    borderRadius: 8,
-    padding: isFs ? "6px 10px" : "5px 9px",
-    fontSize: isFs ? 11 : 10.5,
-    fontWeight: 800,
+  // Tombol filter gaya NetSuite: aktif = biru muda bergaris biru.
+  const filterChip = (active) => ({
+    border: `1px solid ${active ? NS.primary : NS.field}`,
+    background: active ? NS.hover : NS.surface,
+    color: active ? NS.primary : NS.text,
+    borderRadius: 3,
+    padding: "4px 10px",
+    fontSize: 12,
+    fontWeight: 600,
     cursor: "pointer",
     fontFamily: "inherit",
     whiteSpace: "nowrap",
   });
-  // Chip site: selalu diwarnai sesuai warna khas site-nya (bukan cuma pas aktif),
-  // biar tiap lokasi kebeda dari sekilas walau belum dipilih.
-  const siteChip = (active, color) => ({
-    border: `1px solid ${active ? color : `${color}55`}`,
-    background: active ? `${color}22` : `${color}0f`,
-    color, borderRadius: 8,
-    padding: isFs ? "6px 10px" : "5px 9px",
-    fontSize: isFs ? 11 : 10.5,
-    fontWeight: 800,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    whiteSpace: "nowrap",
-  });
+  const siteChip = (active) => filterChip(active);
   const deviceStatusOptions = [
     ["ALL", "Semua", pal.navy],
     ["DOWN", "Down", pal.DOWN],
@@ -865,69 +843,20 @@ export default function NocView() {
   return (
     <div ref={rootRef} className={`dashboard-content noc-wall${isFs ? " noc-fs" : ""}`} style={rootStyle}>
       {loading && !data && <div className="noc-loadbar"><i /></div>}
-      {/* Header */}
-      <div className="dashboard-panel noc-head" style={{
-        padding: isFs ? "14px 22px" : "14px 18px", display: "flex",
-        justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, flexShrink: 0,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-          <span style={{
-            width: isFs ? 13 : 10, height: isFs ? 13 : 10, borderRadius: "50%", flexShrink: 0,
-            background: overall, boxShadow: pal.dotGlow(overall),
-            animation: "noc-pulse 2s infinite",
-          }} />
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{
-              margin: 0, fontSize: isFs ? 22 : 16, fontWeight: 800,
-              letterSpacing: isFs ? "0.1em" : "0.02em", color: pal.text,
-              textTransform: isFs ? "uppercase" : "none",
-            }}>NOC Monitoring</h2>
-            <div style={{ fontSize: isFs ? 12 : 11.5, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
-              {error
-                ? <span style={{ color: pal.DOWN }}>Koneksi backend terputus · data terakhir {lastOk ? lastOk.format("HH:mm:ss") : "-"}</span>
-                : <>Network Operations Center · update {data?.generated_at?.slice(11) || "—"}</>}
-            </div>
-          </div>
-        </div>
-
-
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
-          <div style={{ textAlign: "right", lineHeight: 1.05 }}>
-            <div style={{ fontSize: isFs ? 32 : 15, fontWeight: 800, color: pal.text, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.02em" }}>
-              {clock.format("HH:mm:ss")}
-            </div>
-            <div style={{ fontSize: isFs ? 12 : 10.5, color: pal.muted, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
-              <Calendar width={isFs ? 13 : 11} height={isFs ? 13 : 11} />
-              {fmtTanggal(clock)}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {!isFs && (
-              <button onClick={() => setShowStats(true)} style={{ ...keandalanBtnStyle, display: "inline-flex", alignItems: "center", gap: 6 }} title="Uptime % & MTTR 7 hari">
-                <BarChartSquare02 width={14} height={14} /> Keandalan
-              </button>
-            )}
-            {!isFs && (
-              <button onClick={openReport} style={{ ...tintBtnStyle(pal.teal), display: "inline-flex", alignItems: "center", gap: 6 }} title="Buat & kirim rekap NOC mingguan sekarang">
-                <Send01 width={14} height={14} /> Laporan Mingguan
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Counters */}
-      <div style={{
-        display: "grid", gap: isFs ? 10 : 10, flexShrink: 0,
-        gridTemplateColumns: (isMobile && !isFs) ? "repeat(2, 1fr)" : "repeat(6, 1fr)",
-      }}>
-        <Counter label="Total Site" value={counts.total} color={pal.navy} muted fs={isFs} pal={pal} Icon={MarkerPin05} />
-        <Counter label="Site Up" value={counts.up} color={pal.UP} fs={isFs} pal={pal} Icon={CheckCircle} />
-        <Counter label="Warning" value={counts.warn} color={pal.WARN} muted={counts.warn === 0} fs={isFs} pal={pal} Icon={AlertTriangle} />
-        <Counter label="Site Down" value={counts.down} color={pal.DOWN} muted={counts.down === 0} fs={isFs} pal={pal} Icon={XCircle} />
-        <Counter label="Problem Aktif" value={data?.problem_count ?? 0} color={pal.DOWN} muted={problems.length === 0} fs={isFs} pal={pal} Icon={AlertCircle} />
-        <Counter label="Perangkat Up" value={`${dc.up}/${dc.total}`} color={dc.down ? pal.DOWN : pal.UP} muted={dc.total === 0} fs={isFs} pal={pal} Icon={Server04} />
-      </div>
+      {mode === "full" && <PageHeader
+        title="NOC Monitoring"
+        subtitle={error
+          ? <span style={{ color: NS.bad }}>Backend disconnected · last data {lastOk ? lastOk.format("HH:mm:ss") : "-"}</span>
+          : `${counts.up}/${counts.total} connections normal · ${dc.up}/${dc.total} devices online · ${data?.problem_count ?? 0} alerts · updated ${data?.generated_at?.slice(11, 16) || "—"}`}
+        actions={<>
+          <button onClick={() => setShowStats(true)} style={btn(false)} title="Uptime % & MTTR 7 hari">
+            <BarChartSquare02 width={14} height={14} /> Keandalan
+          </button>
+          <button onClick={openReport} style={btn(true)} title="Buat & kirim rekap NOC mingguan sekarang">
+            <Send01 width={14} height={14} /> Laporan Mingguan
+          </button>
+        </>}
+      />}
 
       {/* ── Panel: Active Problems & Insiden ── */}
       {(() => { const panelProblems = (
@@ -987,7 +916,7 @@ export default function NocView() {
                     <span style={{
                       width: isFs ? 78 : 62, flexShrink: 0, marginTop: 1,
                       fontSize: isFs ? 12.5 : 10.5, fontWeight: 700, color: pal.WARN,
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif",
                     }}>{x.from}</span>
                     <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                       <span style={{ fontSize: isFs ? 13 : 11.5, fontWeight: 800, color: pal.WARN, display: "inline-flex", alignItems: "center", gap: 5 }}>
@@ -1015,7 +944,7 @@ export default function NocView() {
                     <span style={{
                       width: isFs ? 78 : 62, flexShrink: 0, marginTop: 1,
                       fontSize: isFs ? 12.5 : 10.5, fontWeight: 700, color: pal.textSoft,
-                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif",
                     }}>{x.upAt || x.downAt}</span>
 
                     <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1078,7 +1007,7 @@ export default function NocView() {
           <SectionHead
             title="Perangkat / Access Point" fs={isFs} sub="MikroTik Netwatch" pal={pal} stripe={pal.navy}
             right={devices.length ? (
-              <span style={{ fontSize: 11, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+              <span style={{ fontSize: 11, color: pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>
                 {dc.up} up · {dc.down} down{dc.unknown ? ` · ${dc.unknown} ?` : ""}
                 {clientsTotal > 0 && (
                   <> · <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Users01 width={11} height={11} /> {clientsTotal} klien</span></>
@@ -1097,57 +1026,8 @@ export default function NocView() {
                     {label}
                   </button>
                 ))}
-                <span style={{ width: 1, alignSelf: "stretch", background: pal.border, flexShrink: 0 }} />
-                <button onClick={() => setDeviceSiteFilter("ALL")} style={filterChip(deviceSiteFilter === "ALL")}>Semua Lokasi</button>
-                {deviceSiteOptions.map((site) => (
-                  <button key={site} onClick={() => setDeviceSiteFilter(site)} style={siteChip(deviceSiteFilter === site, siteColor(site))}>
-                    {shortLabel(site)}
-                  </button>
-                ))}
               </div>
 
-              <div style={{
-                display: isFs ? "flex" : "grid",
-                gridTemplateColumns: isFs ? undefined : "repeat(auto-fit, minmax(145px, 1fr))",
-                gap: 8,
-                overflowX: isFs ? "auto" : undefined,
-                marginBottom: isFs ? 12 : 10,
-                paddingBottom: isFs ? 2 : undefined,
-                flexShrink: 0,
-              }}>
-                {deviceGroups.map((grp) => { const sc = siteColor(grp.site); return (
-                  <button key={grp.site} onClick={() => setDeviceSiteFilter(grp.site)} className="noc-device-summary" style={{
-                    textAlign: "left",
-                    border: `1px solid ${deviceSiteFilter === grp.site ? sc : pal.border}`,
-                    borderRadius: 10,
-                    padding: isFs ? "9px 12px" : "8px 10px",
-                    background: deviceSiteFilter === grp.site ? `${sc}12` : pal.surfaceAlt,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    minWidth: isFs ? 170 : 0,
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                        <span style={{
-                          width: 20, height: 20, borderRadius: 6, flexShrink: 0,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          background: `${sc}1c`, color: sc,
-                        }}>
-                          <MarkerPin05 width={12} height={12} />
-                        </span>
-                        <span style={{ fontSize: 11.5, fontWeight: 900, color: sc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortLabel(grp.site)}</span>
-                      </span>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: grp.down ? pal.DOWN : pal.UP, boxShadow: pal.dotGlow(grp.down ? pal.DOWN : pal.UP), flexShrink: 0 }} />
-                    </div>
-                    <div style={{ marginTop: 4, fontSize: 10.5, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 800 }}>
-                      {grp.up}/{grp.list.length} up{grp.down ? ` · ${grp.down} down` : ""}
-                      {clients[grp.site] != null && (
-                        <> · <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Users01 width={10} height={10} /> {clients[grp.site]}</span></>
-                      )}
-                    </div>
-                  </button>
-                ); })}
-              </div>
             </>
           )}
           {devices.length === 0 ? (
@@ -1167,15 +1047,15 @@ export default function NocView() {
                   <div key={grp.site} className="noc-device-group" style={{
                     minWidth: 0,
                     border: `1px solid ${sc}33`,
-                    borderRadius: 12,
+                    borderRadius: 3,
                     padding: 12,
                     background: "rgba(255,255,255,0.52)",
-                    boxShadow: "0 12px 28px -28px rgba(16,35,63,0.5)",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <span style={{ fontSize: 14, fontWeight: 900, color: sc, letterSpacing: "0.03em", textTransform: "uppercase" }}>{shortLabel(grp.site)}</span>
                       <span style={{ height: 1, flex: 1, background: `${sc}33` }} />
-                      <span style={{ fontSize: 12, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 800, whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 12, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", fontWeight: 800, whiteSpace: "nowrap" }}>
                         {grp.up}/{grp.list.length} up{grp.down ? ` · ${grp.down} down` : ""}
                       {clients[grp.site] != null && (
                         <> · <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Users01 width={10} height={10} /> {clients[grp.site]}</span></>
@@ -1203,14 +1083,14 @@ export default function NocView() {
                   <div key={grp.site} className="noc-device-group" style={{
                     minWidth: 0,
                     display: "flex", flexDirection: "column",
-                    border: `1px solid ${sc}33`,
-                    borderRadius: 12, padding: 11,
-                    background: "rgba(255,255,255,0.55)",
+                    border: "none",
+                    borderRadius: 3, padding: 11,
+                    background: NS.zebra,
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9, flexShrink: 0 }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 800, color: sc, letterSpacing: "0.02em" }}>{shortLabel(grp.site)}</span>
-                      <span style={{ height: 1, flex: 1, background: `${sc}33` }} />
-                      <span style={{ fontSize: 10.5, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: NS.text }}>{shortLabel(grp.site)}</span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ fontSize: 10.5, color: grp.down ? pal.DOWN : pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>
                         {grp.up}/{grp.list.length} up{grp.down ? ` · ${grp.down} down` : ""}
                       {clients[grp.site] != null && (
                         <> · <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Users01 width={10} height={10} /> {clients[grp.site]}</span></>
@@ -1230,6 +1110,8 @@ export default function NocView() {
           )}
         </div>
       );
+
+      if (mode === "devices") return <div id="perangkat">{panelDevices}</div>;
 
       return isFs ? (
         <div style={{ flex: 1, minHeight: 0, display: "grid", gap: 12, gridTemplateRows: "minmax(230px, 0.38fr) minmax(0, 0.62fr)" }}>
@@ -1251,7 +1133,7 @@ export default function NocView() {
       })()}
 
       {isFs && (
-        <div style={{ flexShrink: 0, textAlign: "center", fontSize: 11, color: pal.muted, fontFamily: "'IBM Plex Mono', monospace", paddingTop: 2 }}>
+        <div style={{ flexShrink: 0, textAlign: "center", fontSize: 11, color: pal.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", paddingTop: 2 }}>
           Auto-refresh 15 detik · Sumber: Zabbix + MikroTik Netwatch
         </div>
       )}
@@ -1297,7 +1179,7 @@ export default function NocView() {
             {/* Header — template Piagam */}
             <div className="dashboard-popup__header">
               <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
-                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                <span style={{ width: 34, height: 34, borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
                   <Clipboard width={18} height={18} />
                 </span>
                 <div style={{ minWidth: 0 }}>
@@ -1324,7 +1206,7 @@ export default function NocView() {
                     worst ? [`terlama ${fmtAge(worst)}`, LIGHT.WARN] : null,
                     (showBo && totalBoSec > 0) ? [`⚠ tak terpantau ${fmtAge(totalBoSec)}`, LIGHT.WARN] : null,
                   ].filter(Boolean).map(([txt, c], i) => (
-                    <span key={i} style={{ fontSize: 10.5, fontWeight: 800, color: c, background: `${c}14`, border: `1px solid ${c}33`, borderRadius: 7, padding: "3px 8px", letterSpacing: "0.02em" }}>{txt}</span>
+                    <span key={i} style={{ fontSize: 10.5, fontWeight: 800, color: c, background: `${c}14`, border: `1px solid ${c}33`, borderRadius: 3, padding: "3px 8px", letterSpacing: "0.02em" }}>{txt}</span>
                   ))}
                 </div>
               )}
@@ -1338,7 +1220,7 @@ export default function NocView() {
                         border: `1px solid ${active ? LIGHT.navy : LIGHT.borderStrong}`,
                         background: active ? `${LIGHT.navy}14` : LIGHT.surfaceAlt,
                         color: active ? LIGHT.navy : LIGHT.textSoft,
-                        borderRadius: 7, padding: "5px 8px", fontSize: 10.5, fontWeight: 800,
+                        borderRadius: 3, padding: "5px 8px", fontSize: 10.5, fontWeight: 800,
                         cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
                       }}>{label}</button>
                     );
@@ -1349,7 +1231,7 @@ export default function NocView() {
                       <input type="date" value={val} onChange={(e) => setter(e.target.value)}
                         min={lbl === "Sampai" ? histFrom || undefined : undefined}
                         max={lbl === "Dari" ? histTo || undefined : undefined}
-                        style={{ padding: "4px 6px", borderRadius: 7, border: `1px solid ${LIGHT.borderStrong}`, background: LIGHT.surfaceAlt, fontSize: 11, color: LIGHT.text, fontFamily: "inherit" }} />
+                        style={{ padding: "4px 6px", borderRadius: 3, border: `1px solid ${LIGHT.borderStrong}`, background: LIGHT.surfaceAlt, fontSize: 11, color: LIGHT.text, fontFamily: "inherit" }} />
                     </label>
                   ))}
                 </div>
@@ -1364,7 +1246,7 @@ export default function NocView() {
                       placeholder="Cari nama site / perangkat…"
                       style={{
                         width: "100%", boxSizing: "border-box", padding: "6px 26px 6px 27px",
-                        borderRadius: 8, border: `1px solid ${LIGHT.borderStrong}`, background: LIGHT.surfaceAlt,
+                        borderRadius: 3, border: `1px solid ${LIGHT.borderStrong}`, background: LIGHT.surfaceAlt,
                         fontSize: 11.5, color: LIGHT.text, fontFamily: "inherit", outline: "none",
                       }}
                     />
@@ -1387,7 +1269,7 @@ export default function NocView() {
                             border: `1px solid ${active ? col : LIGHT.borderStrong}`,
                             background: active ? `${col}14` : LIGHT.surfaceAlt,
                             color: active ? col : LIGHT.textSoft,
-                            borderRadius: 7, padding: "5px 8px", fontSize: 10.5, fontWeight: 800,
+                            borderRadius: 3, padding: "5px 8px", fontSize: 10.5, fontWeight: 800,
                             cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
                           }}>{label}</button>
                         );
@@ -1424,7 +1306,7 @@ export default function NocView() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, position: "sticky", top: 0, background: LIGHT.surface, zIndex: 1, paddingTop: 6 }}>
                       <span style={{ fontSize: 10.5, fontWeight: 800, color: LIGHT.textSoft, textTransform: "uppercase", letterSpacing: "0.06em" }}>{dayLabel(day)}</span>
                       <span style={{ height: 1, flex: 1, background: LIGHT.border }} />
-                      <span style={{ fontSize: 10, color: LIGHT.muted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 10, color: LIGHT.muted, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>
                         {byDay[day].filter((x) => !x._blackout).length} kejadian
                         {(() => { const t = byDay[day].reduce((a, x) => a + (x._blackout ? 0 : (x.duration_seconds || 0)), 0); return t ? ` · total ${fmtAge(t)}` : ""; })()}
                       </span>
@@ -1440,18 +1322,18 @@ export default function NocView() {
                           if (h._blackout) return (
                             <div key={i} className="noc-card" style={{
                               display: "flex", alignItems: "center", gap: 11, padding: "10px 12px",
-                              borderRadius: 10, border: `1px solid ${LIGHT.WARN}33`, background: `${LIGHT.WARN}0d`,
+                              borderRadius: 3, border: `1px solid ${LIGHT.WARN}33`, background: `${LIGHT.WARN}0d`,
                             }}>
-                              <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${LIGHT.WARN}1f`, color: LIGHT.WARN }}>
+                              <span style={{ width: 32, height: 32, borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${LIGHT.WARN}1f`, color: LIGHT.WARN }}>
                                 <AlertTriangle width={16} height={16} />
                               </span>
                               <div style={{ minWidth: 0, flex: 1 }}>
                                 <div style={{ fontSize: 12.5, fontWeight: 800, color: LIGHT.WARN }}>Pemantauan berhenti</div>
-                                <div style={{ fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>
+                                <div style={{ fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", marginTop: 2 }}>
                                   {hhmm(h.started_at)} → {hhmm(h.ended_at)} · server mati, kejadian singkat mungkin tak tercatat
                                 </div>
                               </div>
-                              <span style={{ flexShrink: 0, textAlign: "right", fontSize: 13, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace", color: LIGHT.WARN }}>
+                              <span style={{ flexShrink: 0, textAlign: "right", fontSize: 13, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", color: LIGHT.WARN }}>
                                 {fmtAge(h.seconds)}
                                 <div style={{ fontSize: 8.5, fontWeight: 700, color: LIGHT.muted, letterSpacing: "0.06em", textTransform: "uppercase" }}>tak terpantau</div>
                               </span>
@@ -1463,11 +1345,11 @@ export default function NocView() {
                           return (
                             <div key={i} className="noc-card" style={{
                               display: "flex", alignItems: "center", gap: 11,
-                              padding: "10px 12px", borderRadius: 10,
+                              padding: "10px 12px", borderRadius: 3,
                               border: `1px solid ${h.ongoing ? `${LIGHT.DOWN}33` : LIGHT.border}`,
                               background: h.ongoing ? "rgba(217,45,32,0.035)" : LIGHT.surfaceAlt,
                             }}>
-                              <span style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${c}18`, color: c }}>
+                              <span style={{ width: 32, height: 32, borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: `${c}18`, color: c }}>
                                 <Icon width={16} height={16} />
                               </span>
                               <div style={{ minWidth: 0, flex: 1 }}>
@@ -1475,7 +1357,7 @@ export default function NocView() {
                                   {shortLabel(h.name)}
                                   <span style={{ fontSize: 10, fontWeight: 600, color: LIGHT.muted }}>{"  ·  "}{isSite ? "Koneksi site" : "Perangkat"}</span>
                                 </div>
-                                <div style={{ fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                <div style={{ fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: LIGHT.DOWN }}><XCircle width={10} height={10} />{hhmm(h.down_at)}</span>
                                   <span style={{ color: LIGHT.mutedAccent }}>→</span>
                                   {h.up_at
@@ -1485,7 +1367,7 @@ export default function NocView() {
                               </div>
                               <span style={{
                                 flexShrink: 0, textAlign: "right",
-                                fontSize: 13, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace",
+                                fontSize: 13, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif",
                                 color: h.ongoing ? LIGHT.DOWN : (h.duration_seconds || 0) >= 1800 ? LIGHT.WARN : LIGHT.textSoft,
                               }}>
                                 {fmtAge(h.duration_seconds)}
@@ -1527,7 +1409,7 @@ export default function NocView() {
             {/* Header — template Piagam */}
             <div className="dashboard-popup__header">
               <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
-                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                <span style={{ width: 34, height: 34, borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
                   <BarChartSquare02 width={18} height={18} />
                 </span>
                 <div style={{ minWidth: 0 }}>
@@ -1549,7 +1431,7 @@ export default function NocView() {
                     [`${totalInc} insiden total`, LIGHT.navy],
                     [`total down ${fmtAge(totalDown)}`, LIGHT.WARN],
                   ].map(([txt, c], i) => (
-                    <span key={i} style={{ fontSize: 10.5, fontWeight: 800, color: c, background: `${c}14`, border: `1px solid ${c}33`, borderRadius: 7, padding: "3px 8px" }}>{txt}</span>
+                    <span key={i} style={{ fontSize: 10.5, fontWeight: 800, color: c, background: `${c}14`, border: `1px solid ${c}33`, borderRadius: 3, padding: "3px 8px" }}>{txt}</span>
                   ))}
                 </div>
               )}
@@ -1576,18 +1458,18 @@ export default function NocView() {
                     const p = r.uptime_pct;
                     const c = upClr(p);
                     return (
-                      <div key={i} className="noc-card" style={{ padding: "11px 13px", borderRadius: 11, border: `1px solid ${r.ongoing ? `${LIGHT.DOWN}33` : LIGHT.border}`, background: r.ongoing ? "rgba(217,45,32,0.035)" : LIGHT.surfaceAlt }}>
+                      <div key={i} className="noc-card" style={{ padding: "11px 13px", borderRadius: 3, border: `1px solid ${r.ongoing ? `${LIGHT.DOWN}33` : LIGHT.border}`, background: r.ongoing ? "rgba(217,45,32,0.035)" : LIGHT.surfaceAlt }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
                           <span style={{ fontSize: 13, fontWeight: 800, color: LIGHT.text, overflowWrap: "anywhere" }}>
                             {shortLabel(r.name)}
                             {r.ongoing && <span style={{ fontSize: 9.5, fontWeight: 800, color: LIGHT.DOWN, background: LIGHT.STATE_META.DOWN.bg, borderRadius: 4, padding: "1px 5px", marginLeft: 6 }}>SEDANG DOWN</span>}
                           </span>
-                          <span style={{ fontSize: 15, fontWeight: 800, color: c, fontFamily: "'IBM Plex Mono', monospace" }}>{p == null ? "–" : `${p}%`}</span>
+                          <span style={{ fontSize: 15, fontWeight: 800, color: c, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>{p == null ? "–" : `${p}%`}</span>
                         </div>
                         <div style={{ height: 6, borderRadius: 4, background: `${c}1f`, marginTop: 7, overflow: "hidden" }}>
                           <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, p ?? 100))}%`, background: c, borderRadius: 4 }} />
                         </div>
-                        <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'IBM Plex Mono', monospace", flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", flexWrap: "wrap" }}>
                           <span><b style={{ color: LIGHT.text }}>{r.incidents}</b> insiden</span>
                           <span>down <b style={{ color: LIGHT.text }}>{fmtAge(r.downtime_seconds)}</b></span>
                           <span>MTTR <b style={{ color: LIGHT.text }}>{r.mttr_seconds == null ? "–" : fmtAge(r.mttr_seconds)}</b></span>
@@ -1599,7 +1481,7 @@ export default function NocView() {
               )}
 
               {/* Penjelasan istilah */}
-              <div style={{ marginTop: 16, border: `1px solid ${LIGHT.border}`, borderRadius: 11, padding: "12px 14px", background: `${V}09` }}>
+              <div style={{ marginTop: 16, border: `1px solid ${LIGHT.border}`, borderRadius: 3, padding: "12px 14px", background: `${V}09` }}>
                 <div style={{ fontSize: 10.5, fontWeight: 800, color: V, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Arti istilah</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                   {GLOS.map(([k, v]) => (
@@ -1637,7 +1519,7 @@ export default function NocView() {
           >
             <div className="dashboard-popup__header">
               <div style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
-                <span style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
+                <span style={{ width: 34, height: 34, borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", color: "#fff" }}>
                   <Send01 width={18} height={18} />
                 </span>
                 <div style={{ minWidth: 0 }}>
@@ -1663,7 +1545,7 @@ export default function NocView() {
                     {reportResult.has_ai ? " (sudah termasuk ringkasan AI)." : " (ringkasan AI tidak tersedia untuk periode ini)."}
                   </div>
                   {reportResult.sent && (
-                    <div style={{ fontSize: 12, fontWeight: 700, color: LIGHT.UP, background: LIGHT.STATE_META.UP.bg, borderRadius: 8, padding: "8px 11px", display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: LIGHT.UP, background: LIGHT.STATE_META.UP.bg, borderRadius: 3, padding: "8px 11px", display: "flex", alignItems: "center", gap: 6 }}>
                       <CheckCircle width={15} height={15} /> Terkirim ke WhatsApp
                     </div>
                   )}
@@ -1719,7 +1601,7 @@ export default function NocView() {
 
         .noc-scroll { scrollbar-width: thin; scrollbar-color: rgba(33,76,154,0.22) transparent; scrollbar-gutter: stable; }
         .noc-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-        .noc-scroll::-webkit-scrollbar-thumb { background: rgba(33,76,154,0.22); border-radius: 9px; }
+        .noc-scroll::-webkit-scrollbar-thumb { background: rgba(33,76,154,0.22); border-radius: 3px; }
         .noc-scroll::-webkit-scrollbar-thumb:hover { background: rgba(33,76,154,0.36); }
         .noc-scroll::-webkit-scrollbar-track { background: transparent; }
 
@@ -1727,7 +1609,7 @@ export default function NocView() {
         .noc-fs .dashboard-panel {
           box-shadow: 0 20px 50px -34px rgba(16,35,63,0.45);
           border: 1px solid ${WALL.borderStrong};
-          border-radius: 16px;
+          border-radius: 3px;
           background: ${WALL.panelBg};
           backdrop-filter: blur(10px);
           color: ${WALL.text};
