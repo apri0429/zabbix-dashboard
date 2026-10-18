@@ -8,6 +8,7 @@ import re
 import time
 import math
 import base64
+import json
 import smtplib
 import traceback
 import datetime
@@ -26,6 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -48,9 +50,9 @@ PNM_HEADER_H   = 210 * 348 / 1820   # full-width A4 -> ~40.1 mm (image is 1820x3
 PNM_FOOTER_H   = 210 * 254 / 1820   # full-width A4 -> ~29.3 mm (image is 1820x254)
 
 try:
-    from .mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts
+    from .mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik
 except ImportError:
-    from mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts
+    from mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik
 
 try:
     from . import noc_history
@@ -61,6 +63,11 @@ try:
     from . import noc_report
 except ImportError:
     import noc_report
+
+try:
+    from . import hermes_ai
+except ImportError:
+    import hermes_ai
 
 
 ZABBIX_URL = os.getenv("ZABBIX_URL", "http://192.168.1.233/zabbix")
@@ -3102,6 +3109,10 @@ def _noc_latest_for_names(by_name: Dict[str, Dict], names: List[str]) -> Optiona
     return None
 
 
+# Data ping Zabbix lebih tua dari ini = Zabbix berhenti mengumpulkan data.
+NOC_ZABBIX_STALE_SECONDS = int(os.getenv("NOC_ZABBIX_STALE_SECONDS", "600"))
+
+
 def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
     host_name = cfg.get("host", "").strip()
     cap = CAPACITY.get(label, 0) or 0
@@ -3204,6 +3215,14 @@ def _noc_site_snapshot(label: str, cfg: Dict) -> Dict:
         snap["state"] = "WARN"
     else:
         snap["state"] = "UP"
+
+    # lastvalue Zabbix tetap nilai terakhir walau Zabbix berhenti mengumpulkan
+    # data (mis. jeda tiap malam). Tanpa cek ini site tetap tampil UP padahal
+    # status sebenarnya tidak diketahui.
+    icmp_clock = int((by_key.get("icmpping") or {}).get("lastclock") or 0)
+    if icmp_clock and time.time() - icmp_clock > NOC_ZABBIX_STALE_SECONDS:
+        snap["state"] = "UNKNOWN"
+        snap["stale"] = True
 
     if snap["state"] == "DOWN":
         # Waktu mulai down yang sebenarnya (bukan "last_seen"/waktu polling
@@ -3321,6 +3340,7 @@ def _noc_devices() -> List[Dict]:
             "latency_ms": r.get("latency_ms"),
             "loss_pct": r.get("loss_pct"),
             "since": r.get("since"),
+            "error": r.get("error"),
         })
     out.sort(key=lambda x: (0 if x["state"] == "DOWN" else 1 if x["state"] == "UNKNOWN" else 2,
                             (x["name"] or "").lower()))
@@ -3468,51 +3488,66 @@ def _format_noc_alert(change: Dict) -> str:
     return "\n".join(lines)
 
 
-def _send_whatsapp_message(message: str):
+def _send_whatsapp_message(message: str) -> bool:
+    """Kirim WA ke semua WA_TO. True = terkirim (minimal ke satu nomor), supaya
+    alert yang gagal dikirim bisa dicoba lagi di polling berikutnya."""
     if not WA_ALERT_ENABLED:
-        return
-    if WA_ALERT_MODE == "fonnte":
-        if not (FONNTE_TOKEN and WA_TO):
-            logging.warning("NOC WA Fonnte aktif tapi FONNTE_TOKEN / WA_TO belum diisi")
-            return
-        # Fonnte menerima banyak nomor dipisah koma dalam satu request
-        r = requests.post(FONNTE_URL, headers={"Authorization": FONNTE_TOKEN},
-                          data={"target": ",".join(WA_TO), "message": message}, timeout=20)
-        if r.status_code >= 400 or '"status":false' in r.text.replace(" ", ""):
-            logging.warning("NOC WA Fonnte alert gagal: %s %s", r.status_code, r.text[:500])
-        return
-    if WA_ALERT_MODE == "web":
-        if not WA_TO:
-            logging.warning("NOC WA Web alert aktif tapi WA_TO belum diisi")
-            return
-        headers = {"Content-Type": "application/json"}
-        if WA_WEB_SECRET:
-            headers["X-Alert-Secret"] = WA_WEB_SECRET
-        for to in WA_TO:
-            r = requests.post(WA_WEB_URL, headers=headers, json={"to": to, "message": message}, timeout=20)
-            if r.status_code >= 400:
-                logging.warning("NOC WA Web alert gagal ke %s: %s %s", to, r.status_code, r.text[:500])
-        return
+        return False
+    try:
+        if WA_ALERT_MODE == "fonnte":
+            if not (FONNTE_TOKEN and WA_TO):
+                logging.warning("NOC WA Fonnte aktif tapi FONNTE_TOKEN / WA_TO belum diisi")
+                return False
+            # Fonnte menerima banyak nomor dipisah koma dalam satu request
+            r = requests.post(FONNTE_URL, headers={"Authorization": FONNTE_TOKEN},
+                              data={"target": ",".join(WA_TO), "message": message}, timeout=20)
+            if r.status_code >= 400 or '"status":false' in r.text.replace(" ", ""):
+                logging.warning("NOC WA Fonnte alert gagal: %s %s", r.status_code, r.text[:500])
+                return False
+            return True
+        if WA_ALERT_MODE == "web":
+            if not WA_TO:
+                logging.warning("NOC WA Web alert aktif tapi WA_TO belum diisi")
+                return False
+            headers = {"Content-Type": "application/json"}
+            if WA_WEB_SECRET:
+                headers["X-Alert-Secret"] = WA_WEB_SECRET
+            ok = False
+            for to in WA_TO:
+                r = requests.post(WA_WEB_URL, headers=headers, json={"to": to, "message": message}, timeout=20)
+                if r.status_code >= 400:
+                    logging.warning("NOC WA Web alert gagal ke %s: %s %s", to, r.status_code, r.text[:500])
+                else:
+                    ok = True
+            return ok
 
-    if not (WA_PHONE_NUMBER_ID and WA_ACCESS_TOKEN and WA_TO):
-        logging.warning("NOC WA alert aktif tapi konfigurasi WA_PHONE_NUMBER_ID / WA_ACCESS_TOKEN / WA_TO belum lengkap")
-        return
+        if not (WA_PHONE_NUMBER_ID and WA_ACCESS_TOKEN and WA_TO):
+            logging.warning("NOC WA alert aktif tapi konfigurasi WA_PHONE_NUMBER_ID / WA_ACCESS_TOKEN / WA_TO belum lengkap")
+            return False
 
-    url = f"https://graph.facebook.com/{WA_GRAPH_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    for to in WA_TO:
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"preview_url": False, "body": message},
+        url = f"https://graph.facebook.com/{WA_GRAPH_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        if r.status_code >= 400:
-            logging.warning("NOC WA alert gagal ke %s: %s %s", to, r.status_code, r.text[:500])
+        ok = False
+        for to in WA_TO:
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "text",
+                "text": {"preview_url": False, "body": message},
+            }
+            r = requests.post(url, headers=headers, json=payload, timeout=20)
+            if r.status_code >= 400:
+                logging.warning("NOC WA alert gagal ke %s: %s %s", to, r.status_code, r.text[:500])
+            else:
+                ok = True
+        return ok
+    except requests.RequestException:
+        # Fonnte/jaringan lagi bermasalah: jangan sampai polling NOC ikut gagal.
+        logging.exception("NOC WA: request kirim pesan gagal")
+        return False
 
 
 # Alert DOWN baru dikirim kalau mati terus >= WA_ALERT_MIN_DOWN_SECONDS (anti-spam
@@ -3544,33 +3579,184 @@ def _format_blackout_notice(gap: Dict) -> str:
     ])
 
 
-def _send_noc_alerts(transitions: List[Dict]):
+# Kalau kirim WA gagal (Fonnte error / internet putus), coba lagi sesudah jeda ini.
+WA_ALERT_RETRY_SECONDS = 120
+
+
+def _ts_epoch(ts: Optional[str]) -> Optional[float]:
+    try:
+        return datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
     now = time.time()
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current = {e["key"]: e for e in entities}
+
+    # 1) Transisi ke DOWN. Kalau masih tercatat pending (mis. DOWN -> UNKNOWN ->
+    #    DOWN karena router sempat gagal dibaca), pakai yang lama: waktu mati
+    #    tetap yang asli dan alert-nya tidak terkirim dua kali.
     for change in transitions or []:
         key = change.get("key")
-        if not key:
-            continue
-        if change.get("new_state") == "DOWN":
+        if key and change.get("new_state") == "DOWN" and key not in _WA_PENDING_DOWN:
             _WA_PENDING_DOWN[key] = {"change": change, "since": now, "notified": False}
-        elif change.get("old_state") == "DOWN":
-            entry = _WA_PENDING_DOWN.pop(key, None)
-            if entry and entry["notified"]:
-                try:
-                    change = dict(change, down_at=entry["change"].get("changed_at"),
-                                  duration_seconds=int(now - entry["since"]))
-                    _send_whatsapp_message(_format_noc_alert(change))
-                except Exception:
-                    logging.exception("NOC WA alert pulih gagal dikirim")
-            # belum sempat dikirim DOWN-nya -> putus singkat, abaikan
 
+    # 2) Entity DOWN tanpa transisi: perangkat baru yang langsung DOWN saat
+    #    pertama tercatat, atau yang DOWN waktu backend restart (memori pending
+    #    hilang). Waktu mati diambil dari event terbukanya di DB.
+    missing = [e for e in entities if e["state"] == "DOWN" and e["key"] not in _WA_PENDING_DOWN]
+    if missing:
+        open_events = noc_history.get_open_events()
+        for e in missing:
+            ev = open_events.get(e["key"]) or {}
+            started = _ts_epoch(ev.get("started_at")) or now
+            _WA_PENDING_DOWN[e["key"]] = {
+                "change": {"kind": e["kind"], "key": e["key"], "name": e["name"],
+                           "old_state": "UP", "new_state": "DOWN",
+                           "changed_at": ev.get("started_at") or now_str},
+                "since": started,
+                # Sudah lama DOWN sebelum backend hidup -> alert-nya sudah terkirim
+                # sebelum restart; jangan dikirim ulang.
+                "notified": now - started >= WA_ALERT_MIN_DOWN_SECONDS + 2 * NOC_HISTORY_POLL_SECONDS,
+            }
+
+    # 3) Pulih: dinilai dari status sekarang, bukan dari transisi, supaya
+    #    DOWN -> UNKNOWN -> UP tetap dapat WA "UP". UNKNOWN belum dianggap pulih.
     for key, entry in list(_WA_PENDING_DOWN.items()):
-        if entry["notified"] or now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS:
+        cur = current.get(key)
+        if not cur or cur["state"] in ("DOWN", "UNKNOWN"):
             continue
-        entry["notified"] = True
+        _WA_PENDING_DOWN.pop(key, None)
+        if not entry["notified"]:
+            continue  # putus singkat, DOWN-nya belum sempat dikirim -> abaikan
         try:
-            _send_whatsapp_message(_format_noc_alert(entry["change"]))
+            _send_whatsapp_message(_format_noc_alert({
+                "kind": cur["kind"], "key": key, "name": cur["name"],
+                "old_state": "DOWN", "new_state": cur["state"], "changed_at": now_str,
+                "down_at": entry["change"].get("changed_at"),
+                "duration_seconds": int(now - entry["since"]),
+            }))
+        except Exception:
+            logging.exception("NOC WA alert pulih gagal dikirim")
+
+    # 4) DOWN yang sudah melewati batas -> kirim. Ditandai terkirim hanya kalau
+    #    WA benar-benar terkirim; kalau gagal dicoba lagi nanti.
+    for key, entry in list(_WA_PENDING_DOWN.items()):
+        cur = current.get(key)
+        if entry["notified"] or not cur or cur["state"] != "DOWN":
+            continue
+        if now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS or now < entry.get("retry_at", 0):
+            continue
+        try:
+            sent = _send_whatsapp_message(_format_noc_alert(entry["change"]))
         except Exception:
             logging.exception("NOC WA alert down gagal dikirim")
+            sent = False
+        if sent:
+            entry["notified"] = True
+        else:
+            entry["retry_at"] = now + WA_ALERT_RETRY_SECONDS
+
+
+# Masalah pemantauannya sendiri (bukan perangkat DOWN): router yang Netwatch-nya
+# tidak bisa dibaca, atau Zabbix berhenti mengumpulkan data. Tanpa alert ini,
+# perangkat di site itu cuma diam jadi UNKNOWN dan tidak pernah ada WA.
+_WA_HEALTH: Dict[str, Dict] = {}   # key -> {"info", "since", "notified", "retry_at"}
+
+
+def _noc_health_problems(payload: Dict) -> Dict[str, Dict]:
+    out: Dict[str, Dict] = {}
+    for d in payload.get("devices") or []:
+        if d.get("host") or d.get("state") != "UNKNOWN":
+            continue
+        rn = d.get("router_name") or "-"
+        out[f"router:{rn}"] = {
+            "icon": "📡",
+            "title": f"Router {rn} tidak bisa dibaca",
+            "recovered": f"Router {rn} sudah terbaca lagi",
+            "detail": "Daftar perangkat (Netwatch) di router ini tidak bisa diambil: "
+                      "router mati, VPN putus, atau API router tidak merespons. "
+                      "Selama itu perangkat di site tersebut tidak terpantau.",
+            "lokasi": rn,
+        }
+    sites = payload.get("sites") or []
+    if sites and all(s.get("stale") for s in sites):
+        out["zabbix:stale"] = {
+            "icon": "🖥️",
+            "title": "Zabbix berhenti mengirim data",
+            "recovered": "Zabbix mengirim data lagi",
+            "detail": "Data ping ISP dari Zabbix tidak diperbarui. Cek service "
+                      "zabbix-server / database dan sisa disk di server Zabbix.",
+            "lokasi": "Zabbix server",
+        }
+    return out
+
+
+def _format_health_alert(info: Dict, started: str, recovered_at: Optional[str] = None,
+                         duration: Optional[int] = None) -> str:
+    if recovered_at is None:
+        lines = [
+            "🟠 *NOC ALERT — TIDAK TERPANTAU*",
+            "━━━━━━━━━━━━━━",
+            f"{info['icon']} *{info['title']}*",
+            f"📍 Lokasi : {info['lokasi']}",
+            f"🕐 Sejak   : {started}",
+            f"ℹ️ {info['detail']}",
+            "━━━━━━━━━━━━━━",
+            "⚠️ _Mohon segera dicek._",
+        ]
+    else:
+        lines = [
+            "✅ *NOC — TERPANTAU LAGI*",
+            "━━━━━━━━━━━━━━",
+            f"{info['icon']} *{info['recovered']}*",
+            f"📍 Lokasi : {info['lokasi']}",
+            f"🔻 Mulai    : {started}",
+            f"🔼 Pulih    : {recovered_at}",
+        ]
+        if duration is not None:
+            lines.append(f"⏳ Durasi   : *{noc_report._fmt_dur(duration)}*")
+        lines += ["━━━━━━━━━━━━━━", "👍 _Pemantauan kembali normal._"]
+    return "\n".join(lines)
+
+
+def _check_noc_health(payload: Dict):
+    now = time.time()
+    fmt = "%Y-%m-%d %H:%M:%S"
+    problems = _noc_health_problems(payload)
+
+    for key, entry in list(_WA_HEALTH.items()):
+        if key in problems:
+            continue
+        _WA_HEALTH.pop(key, None)
+        if not entry["notified"]:
+            continue
+        try:
+            _send_whatsapp_message(_format_health_alert(
+                entry["info"], datetime.datetime.fromtimestamp(entry["since"]).strftime(fmt),
+                recovered_at=datetime.datetime.now().strftime(fmt),
+                duration=int(now - entry["since"])))
+        except Exception:
+            logging.exception("NOC WA: kirim pemberitahuan pemantauan pulih gagal")
+
+    for key, info in problems.items():
+        entry = _WA_HEALTH.setdefault(key, {"info": info, "since": now, "notified": False})
+        entry["info"] = info
+        if entry["notified"] or now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS \
+                or now < entry.get("retry_at", 0):
+            continue
+        try:
+            sent = _send_whatsapp_message(_format_health_alert(
+                info, datetime.datetime.fromtimestamp(entry["since"]).strftime(fmt)))
+        except Exception:
+            logging.exception("NOC WA: kirim alert pemantauan gagal")
+            sent = False
+        if sent:
+            entry["notified"] = True
+        else:
+            entry["retry_at"] = now + WA_ALERT_RETRY_SECONDS
 
 
 def _notify_noc_blackout(gap: Dict):
@@ -3604,7 +3790,7 @@ def _reconcile_noc_gap(gap: Dict, live: Dict):
     # asli dari router/Zabbix kalau ada.
     fmt = "%Y-%m-%d %H:%M:%S"
     for e in ents:
-        if e["state"] == "DOWN":
+        if e["state"] in ("DOWN", "UNKNOWN"):
             continue
         entry = _WA_PENDING_DOWN.pop(e["key"], None)
         if not entry or not entry["notified"]:
@@ -3681,7 +3867,12 @@ def _poll_noc_history():
 
     try:
         transitions = noc_history.record_snapshot(entities)
-        _send_noc_alerts(transitions)  # tetap dipanggil walau kosong: cek down yg sudah lewat batas
+        _send_noc_alerts(transitions, entities)  # tetap dipanggil walau kosong: cek down yg sudah lewat batas
+    except Exception:
+        traceback.print_exc()
+
+    try:
+        _check_noc_health(payload)
     except Exception:
         traceback.print_exc()
 
@@ -3798,6 +3989,656 @@ def api_noc_stats(kind: Optional[str] = Query(None, pattern="^(site|device)$"), 
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+#  TANYA JARINGAN  (chat AI Hermes + tool baca data NOC)
+#  Semua tool hanya MEMBACA data; tidak ada yang mengubah konfigurasi router.
+# ─────────────────────────────────────────────
+
+_CHAT_SYSTEM_PROMPT = (
+    "Kamu asisten NOC untuk jaringan kantor. Jawab dalam Bahasa Indonesia yang singkat "
+    "dan jelas, langsung ke inti. Gunakan HANYA data dari tool atau ringkasan di bawah; "
+    "jangan mengarang angka, perangkat, atau penyebab. Kalau datanya tidak ada, katakan "
+    "terus terang. Panggil tool kalau perlu data riwayat, bandwidth, atau detail perangkat.\n\n"
+    "Konteks penting:\n"
+    "- Server Zabbix ada di Duta Garden. Site lain di-ping lewat VPN (uplink KS Tubun, "
+    "cadangan Jatake), jadi latency/packet loss site selain Duta Garden mencerminkan "
+    "kesehatan VPN, BUKAN kualitas ISP. Status ISP yang sebenarnya ada di Netwatch "
+    "(kategori 'isp').\n"
+    "- Garuda 21 adalah link cadangan / CCTV; pemakaian bandwidth rendah di sana normal.\n"
+    "- Uptime pada periode dengan cakupan pemantauan rendah adalah batas atas, bukan pasti.\n"
+    "- Kamu tidak bisa mengubah konfigurasi apa pun; hanya membaca data.\n"
+    "- clients_per_site = jumlah user aktif (lease DHCP) per lokasi; null = router lokasi itu "
+    "sedang tidak bisa dibaca (bukan 0 user).\n"
+    "- Kalau data yang disediakan kurang, pakai tool MCP 'netrowatch' (bila tersedia): "
+    "get_traffic_pattern, zabbix_query, mikrotik_read, dll.\n"
+    "- Field *_seconds dalam detik: tulis durasi dalam hari/jam/menit (mis. '3 jam 12 menit'), "
+    "jangan dalam detik.\n"
+)
+
+
+def _chat_sites_compact(live: Dict) -> List[Dict]:
+    return [{
+        "site": s["label"], "state": s["state"], "since": s.get("since"),
+        "latency_ms": s.get("latency_ms"), "loss_pct": s.get("loss_pct"),
+        "download_mbps": s.get("in_mbps"), "upload_mbps": s.get("out_mbps"),
+        "capacity_mbps": s.get("capacity"), "util_pct": s.get("util_pct"),
+        "via_vpn": s.get("vpn_measured"), "standby": s.get("is_standby"),
+    } for s in live.get("sites", [])]
+
+
+def _chat_tool_live_status() -> Dict:
+    live = api_noc_live()
+    devices = live.get("devices", [])
+    return {
+        "generated_at": live.get("generated_at"),
+        "site_counts": live.get("counts"),
+        "sites": _chat_sites_compact(live),
+        "device_counts": live.get("device_counts"),
+        "devices_not_up": [d for d in devices if d["state"] != "UP"],
+        "clients_per_router": live.get("clients"),
+        "clients_total": live.get("clients_total"),
+        "problems": [{k: p.get(k) for k in ("name", "severity_label", "host", "since", "acknowledged")}
+                     for p in live.get("problems", [])[:30]],
+    }
+
+
+def _chat_tool_devices(search: str = "") -> Dict:
+    q = (search or "").lower().strip()
+    rows = api_noc_live().get("devices", [])
+    if q:
+        rows = [d for d in rows if q in " ".join(str(d.get(k) or "") for k in
+                ("name", "host", "comment", "router_name", "dhcp_name")).lower()]
+    return {"count": len(rows), "devices": rows[:150]}
+
+
+def _chat_tool_network_history(days: int = 7) -> Dict:
+    days = max(1, min(int(days or 7), 365))
+    ov = _cached_overview("network", days, noc_history.get_network_overview)
+    ents = ov.get("entities", [])
+    return {
+        "days": days,
+        "coverage": ov.get("coverage"),
+        "entities_with_issues": [
+            {k: e.get(k) for k in ("category", "name", "location", "host", "state", "state_since",
+                                   "uptime_pct", "incidents", "downtime_seconds", "longest_seconds")}
+            for e in ents if e.get("incidents") or e.get("state") != "UP"],
+        "entities_all_ok": sum(1 for e in ents if not e.get("incidents") and e.get("state") == "UP"),
+        "incident_totals": ov.get("incident_totals"),
+        "recent_incidents": ov.get("incidents", [])[:60],
+    }
+
+
+def _chat_tool_site_uptime(days: int = 7) -> Dict:
+    days = max(1, min(int(days or 7), 90))
+    return {"days": days,
+            "sites": noc_history.get_uptime_stats(kind="site", days=days),
+            "blackouts": noc_history.get_blackouts(days=days)}
+
+
+def _chat_tool_downtime_log(days: int = 7, search: str = "") -> Dict:
+    days = max(1, min(int(days or 7), 365))
+    q = (search or "").lower().strip()
+    rows = noc_history.get_downtime_log(days=days, limit=5000)
+    if q:
+        rows = [r for r in rows if q in f"{r.get('name') or ''} {r.get('key') or ''}".lower()]
+    return {"days": days, "count": len(rows), "events": rows[:80]}
+
+
+def _chat_tool_bandwidth(days: int = 1) -> Dict:
+    days = max(1, min(int(days or 1), 31))
+    end_dt = datetime.datetime.now()
+    start_dt = end_dt - datetime.timedelta(days=days)
+    rows = build_summary(start_dt, end_dt)
+    keys = ("label", "capacity", "avg_download", "avg_upload", "peak_download", "peak_upload",
+            "p95_download", "p95_upload", "max_avg_pct", "max_peak_pct", "status", "status_reason",
+            "latency_avg_ms", "loss_avg_pct", "conn_quality", "vpn_measured", "is_standby")
+    return {"days": days, "busy_hours": busy_hours_label(),
+            "sites": [{k: r.get(k) for k in keys} for r in rows]}
+
+
+def _int_param(desc: str, default: int) -> Dict:
+    return {"type": "integer", "description": desc, "default": default}
+
+
+_CHAT_TOOLS = [
+    {"type": "function", "function": {
+        "name": "get_live_status",
+        "description": "Kondisi jaringan SAAT INI: status tiap site (UP/WARN/DOWN), latency, loss, "
+                       "trafik, perangkat Netwatch yang tidak UP, jumlah klien, problem Zabbix aktif.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "find_devices",
+        "description": "Cari perangkat Netwatch (access point, switch, ISP) berdasarkan nama/IP/lokasi "
+                       "beserta status UP/DOWN-nya saat ini.",
+        "parameters": {"type": "object", "properties": {
+            "search": {"type": "string", "description": "kata kunci nama, IP, atau nama router/site"}}}}},
+    {"type": "function", "function": {
+        "name": "get_network_history",
+        "description": "Riwayat ISP & perangkat LAN N hari terakhir: uptime %, jumlah putus, durasi, "
+                       "insiden terbaru, dan cakupan pemantauan.",
+        "parameters": {"type": "object", "properties": {
+            "days": _int_param("jumlah hari ke belakang (1-365)", 7)}}}},
+    {"type": "function", "function": {
+        "name": "get_site_uptime",
+        "description": "Uptime % per site (ping Zabbix), jumlah insiden, MTTR untuk N hari terakhir, "
+                       "plus periode saat pemantauan mati (blackout).",
+        "parameters": {"type": "object", "properties": {"days": _int_param("1-90", 7)}}}},
+    {"type": "function", "function": {
+        "name": "get_downtime_log",
+        "description": "Daftar kejadian DOWN (kapan mati, kapan pulih, durasi) N hari terakhir, "
+                       "bisa difilter nama perangkat/site.",
+        "parameters": {"type": "object", "properties": {
+            "days": _int_param("1-365", 7),
+            "search": {"type": "string", "description": "filter nama (opsional)"}}}}},
+    {"type": "function", "function": {
+        "name": "get_bandwidth_summary",
+        "description": "Pemakaian bandwidth per link ISP N hari terakhir: rata-rata & puncak download/"
+                       "upload (Mbps), persen kapasitas, status beban (STABIL/PADAT/TINGGI), kualitas.",
+        "parameters": {"type": "object", "properties": {"days": _int_param("1-31", 1)}}}},
+]
+
+_CHAT_HANDLERS = {
+    "get_live_status": _chat_tool_live_status,
+    "find_devices": _chat_tool_devices,
+    "get_network_history": _chat_tool_network_history,
+    "get_site_uptime": _chat_tool_site_uptime,
+    "get_downtime_log": _chat_tool_downtime_log,
+    "get_bandwidth_summary": _chat_tool_bandwidth,
+}
+
+CHAT_MAX_HISTORY = 12
+CHAT_MAX_CHARS = 4000
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+
+
+@app.get("/api/noc/chat/info")
+def api_noc_chat_info():
+    return {"success": True, "enabled": hermes_ai.enabled(), "model": hermes_ai.HERMES_MODEL}
+
+
+@app.post("/api/noc/chat")
+def api_noc_chat(req: ChatRequest):
+    if not hermes_ai.enabled():
+        raise HTTPException(status_code=503, detail="Chat AI belum aktif: isi HERMES_BASE_URL dan "
+                                                    "HERMES_MODEL di backend/app/.env")
+    history = [{"role": m.role, "content": m.content[:CHAT_MAX_CHARS]}
+               for m in req.messages if m.role in ("user", "assistant") and m.content.strip()]
+    history = history[-CHAT_MAX_HISTORY:]
+    if not history or history[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="Pesan terakhir harus dari user")
+
+    # Ringkasan kondisi terkini selalu ikut, supaya pertanyaan sederhana terjawab
+    # tanpa tool (dan tetap jalan di model/server yang tidak mendukung tools).
+    system = _CHAT_SYSTEM_PROMPT + f"\nWaktu sekarang: {datetime.datetime.now():%Y-%m-%d %H:%M} WIB.\n"
+    try:
+        live = api_noc_live()
+        system += "\nRingkasan kondisi saat ini (JSON):\n" + json.dumps({
+            "site_counts": live.get("counts"),
+            "sites": _chat_sites_compact(live),
+            "device_counts": live.get("device_counts"),
+            "devices_down": [d["name"] + (f" ({d['router_name']})" if d.get("router_name") else "")
+                             for d in live.get("devices", []) if d["state"] == "DOWN"][:40],
+            "problem_count": live.get("problem_count"),
+            "clients_total": live.get("clients_total"),
+            # Jumlah user aktif (lease DHCP) per lokasi/router.
+            "clients_per_site": live.get("clients"),
+        }, ensure_ascii=False, default=str)
+    except Exception:
+        traceback.print_exc()
+        system += "\n(Data live sedang tidak bisa diambil.)"
+
+    prefetched: List[str] = []
+    if not hermes_ai.HERMES_USE_TOOLS:
+        system, prefetched = _chat_prefetch_context(system, history[-1]["content"])
+
+    try:
+        out = hermes_ai.chat_with_tools([{"role": "system", "content": system}] + history,
+                                        _CHAT_TOOLS, _CHAT_HANDLERS)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"Gagal menghubungi Hermes: {e}")
+    return {"success": True, "answer": out["answer"] or "(Model tidak memberi jawaban.)",
+            "tools_used": prefetched + out["tools_used"], "model": hermes_ai.HERMES_MODEL}
+
+
+# Data MikroTik di-cache sebentar supaya chat beruntun tidak membanjiri router
+# (sebagian lewat VPN); bandwidth Zabbix lebih lama karena query riwayatnya berat.
+_CHAT_DATA_CACHE: Dict[str, Tuple[datetime.datetime, object]] = {}
+CHAT_ROUTER_TTL = 60
+CHAT_BANDWIDTH_TTL = 600
+CHAT_SOURCE_TIMEOUT = 40      # detik maksimal menunggu semua sumber data
+CHAT_SOURCE_MAX_CHARS = 25000  # batas ukuran JSON per sumber di prompt
+
+
+def _chat_cached(key: str, ttl: int, fn):
+    cached = get_cache_value(_CHAT_DATA_CACHE, key)
+    if cached is not None:
+        return cached
+    return set_cache_value(_CHAT_DATA_CACHE, key, fn(), ttl)
+
+
+def _mbps(v) -> Optional[float]:
+    try:
+        return round(float(v) / 1e6, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chat_per_router(fn, row_fn) -> Dict[str, object]:
+    """fn(router_id) untuk tiap router secara paralel. Router yang gagal (mis. VPN
+    putus) dicatat sebagai error tanpa menggagalkan router lain."""
+    from concurrent.futures import ThreadPoolExecutor
+    routers = get_router_list()
+    out: Dict[str, object] = {}
+    with ThreadPoolExecutor(max_workers=max(1, len(routers))) as pool:
+        futs = {r["router_name"]: pool.submit(fn, r["router_id"]) for r in routers}
+        for name, f in futs.items():
+            try:
+                out[name] = [row_fn(x) for x in f.result()]
+            except Exception as e:
+                out[name] = {"error": f"router tidak bisa dibaca: {e}"}
+    return out
+
+
+def _chat_network_profile() -> Dict:
+    return {
+        "isp_links": [{
+            "link": label, "zabbix_host": cfg.get("host"),
+            "capacity_mbps": CAPACITY.get(label), "ping_via_vpn": is_vpn_measured(label),
+            "note": STANDBY_LABELS.get(label) or None,
+        } for label, cfg in ITEM_MAP.items()],
+        "mikrotik_routers": [{"name": r["router_name"], "host": r["router_host"]}
+                             for r in get_router_list()],
+        "bandwidth_busy_hours": busy_hours_label(),
+    }
+
+
+def _chat_dhcp_users() -> Dict:
+    return _chat_per_router(get_dhcp_active, lambda x: {
+        "ip": x.get("address"), "mac": x.get("mac-address"), "hostname": x.get("host-name"),
+        "comment": x.get("comment"), "last_seen": x.get("last-seen")})
+
+
+def _chat_port_traffic() -> Dict:
+    return _chat_per_router(get_ether_traffic, lambda x: {
+        "port": x.get("name"), "comment": x.get("comment"), "rate_mbps": _mbps(x.get("rate")),
+        "link_speed_mbps": _mbps(x.get("max-limit"))})
+
+
+def _chat_queue_tree() -> Dict:
+    return _chat_per_router(get_queue_tree, lambda x: {
+        "name": x.get("name"), "parent": x.get("parent"), "rate_mbps": _mbps(x.get("rate")),
+        "max_limit": x.get("max-limit"), "dropped": x.get("dropped")})
+
+
+def _chat_router_status() -> List[Dict]:
+    out = []
+    for r in get_router_status():
+        total = r.get("total_memory") or 0
+        out.append({
+            "router": r.get("router_name"), "online": r.get("online"), "cpu_pct": r.get("cpu_load"),
+            "memory_used_pct": round(100 * (r.get("used_memory") or 0) / total, 1) if total else None,
+            "uptime": r.get("uptime"), "board": r.get("board_name"), "routeros": r.get("version"),
+            "error": r.get("error"),
+        })
+    return out
+
+
+def _chat_live_detail() -> Dict:
+    live = api_noc_live()
+    return {
+        "devices_netwatch": [{k: d.get(k) for k in ("name", "host", "router_name", "state", "since",
+                                                    "latency_ms", "loss_pct", "comment")}
+                             for d in live.get("devices", [])],
+        "zabbix_problems": [{k: p.get(k) for k in ("name", "severity_label", "host", "since",
+                                                   "acknowledged")}
+                            for p in live.get("problems", [])],
+    }
+
+
+def _chat_period_days(q: str) -> Tuple[int, bool]:
+    """(hari, disebut_eksplisit) dari pertanyaan."""
+    if "bulan" in q or "30 hari" in q:
+        return 30, True
+    if "minggu" in q or "7 hari" in q or "pekan" in q:
+        return 7, True
+    if "kemarin" in q:
+        return 2, True
+    if "hari ini" in q or "sekarang" in q or "saat ini" in q:
+        return 1, True
+    return 7, False
+
+
+_CHAT_PATTERN_WORDS = ("jam", "kapan", "hari apa", "pola", "sibuk", "penuh", "puncak", "peak",
+                       "padat", "ramai", "tren", "trend", "rata-rata", "lonjakan", "bandwidth",
+                       "trafik", "traffic", "mbps", "lambat", "lemot", "beban", "kapasitas",
+                       "download", "upload", "pemakaian", "internet")
+
+
+def _chat_prefetch_context(system: str, question: str) -> Tuple[str, List[str]]:
+    """Mode tanpa tools (Hermes Agent): kumpulkan gambaran LENGKAP jaringan di muka
+    (profil, perangkat, user DHCP, router, trafik port, queue, riwayat, bandwidth)
+    secara paralel lalu tempel ke prompt, supaya pertanyaan apa pun bisa dijawab.
+    Sumber yang lambat/gagal dilewati dengan catatan, bukan menggagalkan chat."""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
+    q = question.lower()
+    days, explicit = _chat_period_days(q)
+
+    jobs = {
+        "profil_jaringan": lambda: _chat_cached("profile", 3600, _chat_network_profile),
+        "perangkat_dan_problem": _chat_live_detail,
+        "user_dhcp_aktif": lambda: _chat_cached("dhcp", CHAT_ROUTER_TTL, _chat_dhcp_users),
+        "status_router": lambda: _chat_cached("routers", CHAT_ROUTER_TTL, _chat_router_status),
+        "trafik_port_live": lambda: _chat_cached("ports", CHAT_ROUTER_TTL, _chat_port_traffic),
+        "queue_tree": lambda: _chat_cached("queues", CHAT_ROUTER_TTL, _chat_queue_tree),
+        f"riwayat_isp_perangkat_{days}h": lambda: _chat_tool_network_history(days),
+        f"uptime_site_{days}h": lambda: _chat_tool_site_uptime(days),
+        f"log_downtime_{days}h": lambda: _chat_tool_downtime_log(days),
+    }
+    # Trafik/bandwidth dari trend Zabbix per jam (cepat). build_summary (riwayat mentah)
+    # bisa >1 menit, jadi tidak dipakai di chat; tetap ada sebagai tool MCP.
+    if any(w in q for w in _CHAT_PATTERN_WORDS):
+        pdays = days if explicit else 7
+        jobs[f"pola_trafik_{pdays}h"] = lambda: _chat_cached(
+            f"pattern:{pdays}", CHAT_BANDWIDTH_TTL, lambda: _chat_tool_traffic_pattern(pdays))
+    pool = ThreadPoolExecutor(max_workers=len(jobs))
+    futs = {name: pool.submit(fn) for name, fn in jobs.items()}
+    deadline = time.monotonic() + CHAT_SOURCE_TIMEOUT
+    system += ("\n\nDi bawah ini data LENGKAP jaringan saat ini (semua lokasi). Jawab "
+               "pertanyaan apa pun dari data ini; sebut lokasi/router-nya bila relevan.")
+    for name, f in futs.items():
+        try:
+            data = f.result(timeout=max(0.1, deadline - time.monotonic()))
+        except FutTimeout:
+            data = {"error": "data tidak sempat diambil (terlalu lama)"}
+        except Exception as e:
+            traceback.print_exc()
+            data = {"error": str(e)}
+        system += (f"\n\n### {name} (JSON)\n"
+                   + json.dumps(data, ensure_ascii=False, default=str)[:CHAT_SOURCE_MAX_CHARS])
+    pool.shutdown(wait=False)  # sumber yang lambat dibiarkan selesai sendiri di belakang
+    return system, list(jobs)
+
+
+# ─────────────────────────────────────────────
+#  POLA TRAFIK + AKSES BACA BEBAS (Zabbix/MikroTik) + SERVER MCP
+#  Supaya Hermes bisa menjawab pertanyaan bebas ("jam berapa trafik penuh?",
+#  "hari apa paling padat?") dan menggali data sendiri. Semua HANYA membaca.
+# ─────────────────────────────────────────────
+
+_HARI_ID = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+
+
+def _trend_rows(itemid: str, start_ts: int, end_ts: int) -> List[Dict]:
+    """Trend Zabbix = rata-rata & maksimum per jam. Ringan untuk rentang panjang
+    (history.get dibatasi 20 ribu sampel, jadi terpotong untuk 30 hari)."""
+    return zabbix_request("trend.get", {
+        "output": ["clock", "value_avg", "value_max"],
+        "itemids": [itemid], "time_from": start_ts, "time_till": end_ts, "limit": 20000,
+    }) or []
+
+
+def _chat_tool_traffic_pattern(days: int = 7, link: str = "") -> Dict:
+    days = max(1, min(int(days or 7), 90))
+    q = (link or "").lower().strip()
+    end_dt = datetime.datetime.now()
+    start_ts, end_ts = datetime_range_to_timestamps(end_dt - datetime.timedelta(days=days), end_dt)
+    links = [(label, cfg) for label, cfg in ITEM_MAP.items() if not q or q in label.lower()]
+
+    def one(label: str, cfg: Dict) -> Dict:
+        cap = CAPACITY.get(label, 0) or 0
+        host = cfg.get("host", "")
+        slots: Dict[int, Dict[str, float]] = {}  # clock jam -> {dl_avg, dl_max, ul_avg, ul_max}
+        for key, aliases in (("dl", cfg.get("recv", [])), ("ul", cfg.get("sent", []))):
+            itemid, _ = find_first_valid_itemid(host, aliases)
+            if not itemid:
+                continue
+            for r in _trend_rows(itemid, start_ts, end_ts):
+                s = slots.setdefault(int(r["clock"]), {})
+                s[f"{key}_avg"] = sanitize_single_bandwidth_value(float(r["value_avg"]) / 1e6, cap)
+                s[f"{key}_max"] = sanitize_single_bandwidth_value(float(r["value_max"]) / 1e6, cap)
+        if not slots:
+            return {"link": label, "capacity_mbps": cap, "error": "data trend kosong atau Zabbix sedang tidak bisa dihubungi (bukan berarti trafiknya nol)"}
+
+        def pct(v):
+            return round(100 * v / cap, 1) if cap else None
+
+        by_hour: Dict[int, List[Dict]] = {}
+        by_wd: Dict[int, List[Dict]] = {}
+        by_day: Dict[str, List[Tuple[int, Dict]]] = {}
+        for clock, s in slots.items():
+            dt = datetime.datetime.fromtimestamp(clock)
+            by_hour.setdefault(dt.hour, []).append(s)
+            by_wd.setdefault(dt.weekday(), []).append(s)
+            by_day.setdefault(dt.strftime("%Y-%m-%d"), []).append((dt.hour, s))
+
+        def agg(rows):
+            dl = [r.get("dl_avg", 0) for r in rows]
+            return {"dl_avg_mbps": round(statistics.mean(dl), 2),
+                    "dl_peak_mbps": round(max(r.get("dl_max", 0) for r in rows), 2),
+                    "ul_avg_mbps": round(statistics.mean(r.get("ul_avg", 0) for r in rows), 2),
+                    "dl_avg_pct": pct(statistics.mean(dl))}
+
+        ranked = sorted(slots.items(), key=lambda kv: kv[1].get("dl_avg", 0), reverse=True)
+        busy = [(c, s) for c, s in slots.items() if cap and s.get("dl_avg", 0) >= 0.8 * cap]
+        return {
+            "link": label, "capacity_mbps": cap, "hours_with_data": len(slots),
+            "by_hour_of_day": {f"{h:02d}:00": agg(v) for h, v in sorted(by_hour.items())},
+            "by_weekday": {_HARI_ID[d]: agg(v) for d, v in sorted(by_wd.items())},
+            "busiest_hours": [{
+                "time": (lambda dt: f"{dt:%Y-%m-%d} ({_HARI_ID[dt.weekday()]}) {dt:%H}:00")(
+                    datetime.datetime.fromtimestamp(c)),
+                "dl_avg_mbps": round(s.get("dl_avg", 0), 2), "dl_peak_mbps": round(s.get("dl_max", 0), 2),
+                "dl_avg_pct": pct(s.get("dl_avg", 0)),
+            } for c, s in ranked[:8]],
+            "hours_over_80pct_capacity": len(busy),
+            "daily": {d: {**agg([s for _, s in v]),
+                          "peak_hour": f"{max(v, key=lambda hs: hs[1].get('dl_avg', 0))[0]:02d}:00"}
+                      for d, v in sorted(by_day.items())},
+        }
+
+    # Tiap link 2 query trend ke Zabbix; paralel supaya 7 link tidak menunggu berurutan.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, len(links))) as pool:
+        out = list(pool.map(lambda lc: one(*lc), links))
+    return {"days": days, "note": "Dari trend Zabbix per jam (rata-rata & puncak tiap jam). "
+                                   "dl = download, ul = upload, pct = persen kapasitas langganan.",
+            "links": out}
+
+
+# Hanya metode baca. Token Zabbix dashboard bisa saja punya hak tulis, jadi
+# daftar ini yang menjaga Hermes tidak bisa mengubah apa pun.
+_ZABBIX_READ_METHODS = {
+    "host.get", "hostgroup.get", "item.get", "history.get", "trend.get", "problem.get",
+    "event.get", "trigger.get", "graph.get", "alert.get", "hostinterface.get", "template.get",
+}
+
+
+def _chat_tool_zabbix_query(method: str, params: Optional[Dict] = None) -> Dict:
+    method = (method or "").strip()
+    if method not in _ZABBIX_READ_METHODS:
+        return {"error": f"metode '{method}' tidak diizinkan; hanya: {sorted(_ZABBIX_READ_METHODS)}"}
+    params = dict(params or {})
+    params.setdefault("limit", 500)
+    res = zabbix_request(method, params)
+    return {"method": method, "count": len(res) if isinstance(res, list) else None, "result": res}
+
+
+# Menu yang berisi rahasia (password, secret, kunci) tidak boleh dibaca.
+_MIKROTIK_BLOCKED = ("/user", "/ppp/secret", "/ip/hotspot/user", "/interface/wireless/security-profiles",
+                     "/interface/wifi/security", "/certificate", "/system/script", "/file", "/radius",
+                     "/snmp/community", "/ip/ipsec")
+_SECRET_FIELD = re.compile(r"pass|secret|key|token|psk|community", re.I)
+
+
+def _chat_tool_mikrotik_read(router: str, path: str) -> Dict:
+    path = "/" + (path or "").strip().strip("/")
+    if path == "/" or any(path == b or path.startswith(b + "/") for b in _MIKROTIK_BLOCKED):
+        return {"error": f"menu '{path}' tidak boleh dibaca (berisi rahasia) atau kosong"}
+    q = (router or "").lower().strip()
+    matches = [r for r in get_mikrotik_configs() if q and q in r["name"].lower()]
+    if not matches:
+        return {"error": f"router '{router}' tidak ditemukan",
+                "routers": [r["name"] for r in get_mikrotik_configs()]}
+    cfg = matches[0]
+    conn = None
+    try:
+        conn = connect_mikrotik(cfg)
+        rows = conn.get_api().get_resource(path).get()  # = /print, hanya membaca
+    finally:
+        if conn:
+            conn.disconnect()
+    clean = [{k: ("***" if _SECRET_FIELD.search(k) else v) for k, v in r.items()} for r in rows[:500]]
+    return {"router": cfg["name"], "path": path, "count": len(rows), "rows": clean}
+
+
+_CHAT_TOOLS += [
+    {"type": "function", "function": {
+        "name": "get_traffic_pattern",
+        "description": "Pola trafik per link ISP N hari terakhir dari trend Zabbix: rata-rata per jam "
+                       "(00-23), per hari (Senin-Minggu), jam tersibuk, jumlah jam >=80% kapasitas, "
+                       "ringkasan harian + jam puncaknya. Untuk pertanyaan 'jam berapa / hari apa "
+                       "trafik penuh'.",
+        "parameters": {"type": "object", "properties": {
+            "days": _int_param("1-90", 7),
+            "link": {"type": "string", "description": "filter nama link/lokasi, mis. 'Jatake' (opsional)"}}}}},
+    {"type": "function", "function": {
+        "name": "zabbix_query",
+        "description": "Panggil API Zabbix langsung (HANYA metode baca: host.get, item.get, history.get, "
+                       "trend.get, problem.get, event.get, trigger.get, alert.get, dll.). Untuk data yang "
+                       "tidak tersedia di tool lain.",
+        "parameters": {"type": "object", "properties": {
+            "method": {"type": "string", "description": "mis. 'item.get'"},
+            "params": {"type": "object", "description": "parameter API Zabbix (JSON)"}},
+            "required": ["method"]}}},
+    {"type": "function", "function": {
+        "name": "mikrotik_read",
+        "description": "Baca menu RouterOS apa pun dari router MikroTik (setara /print, tidak mengubah apa "
+                       "pun), mis. /interface, /ip/address, /ip/route, /log, /ip/firewall/filter, "
+                       "/ip/dhcp-server/lease, /queue/simple, /system/resource, /tool/netwatch.",
+        "parameters": {"type": "object", "properties": {
+            "router": {"type": "string", "description": "nama router/lokasi, mis. 'Jatake'"},
+            "path": {"type": "string", "description": "menu RouterOS, mis. '/interface'"}},
+            "required": ["router", "path"]}}},
+    {"type": "function", "function": {
+        "name": "get_dhcp_users",
+        "description": "Daftar user/perangkat aktif (lease DHCP) per router: IP, MAC, hostname, komentar.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "get_router_status",
+        "description": "CPU, memori, uptime, versi RouterOS semua router MikroTik.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "get_port_traffic",
+        "description": "Trafik live per port ether (download/upload Mbps) semua router.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "get_network_profile",
+        "description": "Profil jaringan: link ISP, kapasitas, router, catatan VPN/cadangan.",
+        "parameters": {"type": "object", "properties": {}}}},
+]
+_CHAT_HANDLERS.update({
+    "get_traffic_pattern": _chat_tool_traffic_pattern,
+    "zabbix_query": _chat_tool_zabbix_query,
+    "mikrotik_read": _chat_tool_mikrotik_read,
+    "get_dhcp_users": lambda: _chat_cached("dhcp", CHAT_ROUTER_TTL, _chat_dhcp_users),
+    "get_router_status": lambda: _chat_cached("routers", CHAT_ROUTER_TTL, _chat_router_status),
+    "get_port_traffic": lambda: _chat_cached("ports", CHAT_ROUTER_TTL, _chat_port_traffic),
+    "get_network_profile": lambda: _chat_cached("profile", 3600, _chat_network_profile),
+})
+
+
+# ── Server MCP (Streamable HTTP, balasan JSON) untuk Hermes Agent ──
+# Daftarkan di Hermes: mcp_servers.netrowatch.url = http(s)://<dashboard>/api/mcp
+# dengan header Authorization: Bearer <MCP_TOKEN>. MCP_TOKEN kosong = MCP mati.
+MCP_TOKEN = os.getenv("MCP_TOKEN", "").strip()
+MCP_PROTOCOL_VERSION = "2025-03-26"
+MCP_MAX_CHARS = 60000
+
+
+def _mcp_result(rid, result=None, error=None) -> Dict:
+    msg = {"jsonrpc": "2.0", "id": rid}
+    if error is not None:
+        msg["error"] = error
+    else:
+        msg["result"] = result
+    return msg
+
+
+def _mcp_handle(msg: Dict) -> Optional[Dict]:
+    method = msg.get("method")
+    rid = msg.get("id")
+    params = msg.get("params") or {}
+    if rid is None:  # notifikasi (mis. notifications/initialized): tanpa balasan
+        return None
+    if method == "initialize":
+        return _mcp_result(rid, {
+            "protocolVersion": params.get("protocolVersion") or MCP_PROTOCOL_VERSION,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "netrowatch", "version": "1.0"},
+            "instructions": _CHAT_SYSTEM_PROMPT,
+        })
+    if method == "ping":
+        return _mcp_result(rid, {})
+    if method == "tools/list":
+        return _mcp_result(rid, {"tools": [{
+            "name": t["function"]["name"],
+            "description": t["function"]["description"],
+            "inputSchema": t["function"].get("parameters") or {"type": "object", "properties": {}},
+        } for t in _CHAT_TOOLS]})
+    if method == "tools/call":
+        name = params.get("name") or ""
+        handler = _CHAT_HANDLERS.get(name)
+        if handler is None:
+            return _mcp_result(rid, error={"code": -32602, "message": f"tool '{name}' tidak dikenal"})
+        try:
+            data = handler(**(params.get("arguments") or {}))
+            is_err = isinstance(data, dict) and "error" in data and len(data) <= 2
+        except Exception as e:
+            traceback.print_exc()
+            data, is_err = {"error": str(e)}, True
+        text = json.dumps(data, ensure_ascii=False, default=str)
+        if len(text) > MCP_MAX_CHARS:
+            text = text[:MCP_MAX_CHARS] + " …(dipotong; persempit parameter)"
+        return _mcp_result(rid, {"content": [{"type": "text", "text": text}], "isError": is_err})
+    return _mcp_result(rid, error={"code": -32601, "message": f"metode '{method}' tidak didukung"})
+
+
+@app.post("/api/mcp")
+async def api_mcp(request: Request):
+    from fastapi.responses import JSONResponse, Response
+    from starlette.concurrency import run_in_threadpool
+    if not MCP_TOKEN:
+        raise HTTPException(status_code=404, detail="MCP nonaktif (isi MCP_TOKEN di .env)")
+    if request.headers.get("authorization", "") != f"Bearer {MCP_TOKEN}":
+        raise HTTPException(status_code=401, detail="token MCP salah")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(_mcp_result(None, error={"code": -32700, "message": "JSON tidak valid"}), status_code=400)
+    msgs = body if isinstance(body, list) else [body]
+    # Tool memanggil Zabbix/MikroTik (blocking) -> jalankan di thread.
+    replies = [r for r in [await run_in_threadpool(_mcp_handle, m) for m in msgs] if r is not None]
+    if not replies:
+        return Response(status_code=202)
+    return JSONResponse(replies if isinstance(body, list) else replies[0])
+
+
+@app.get("/api/mcp")
+def api_mcp_get():
+    # Tidak ada stream SSE dari server; klien MCP cukup memakai POST.
+    from fastapi.responses import Response
+    return Response(status_code=405, headers={"Allow": "POST"})
 
 
 # ─────────────────────────────────────────────

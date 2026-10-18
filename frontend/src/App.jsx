@@ -1,5 +1,6 @@
 import { Component, useState, useEffect, lazy, Suspense } from "react";
 import Layout from "./components/Layout";
+import ChatWidget from "./components/ChatWidget";
 
 // Setelah build baru, nama file halaman berubah. Browser yang masih memegang versi
 // lama akan gagal memuat file halaman; dalam kasus itu muat ulang sekali saja
@@ -96,6 +97,7 @@ export default function App() {
           <Page />
         </Suspense>
       </PageErrorBoundary>
+      <ChatWidget />
     </Layout>
   );
 }

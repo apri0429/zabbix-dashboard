@@ -18,7 +18,7 @@ const PATH_TO_KEY = {
 const defaultPath = '/dashboard'
 
 // Alamat lama yang sudah digabung ke halaman lain (mis. tautan /noc di email laporan).
-const REDIRECTS = { '/noc': '/dashboard' }
+const REDIRECTS = { '/noc': '/dashboard', '/tanya': '/dashboard' }
 
 function getCurrentPath() {
   if (REDIRECTS[window.location.pathname]) {

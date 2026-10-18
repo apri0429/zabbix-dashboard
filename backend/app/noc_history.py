@@ -875,6 +875,19 @@ def get_open_entity_keys() -> set:
     return {r["entity_key"] for r in rows}
 
 
+def get_open_events() -> Dict[str, Dict]:
+    """{entity_key: {"state", "started_at"}} untuk event yang masih berlangsung."""
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT entity_key, state, started_at FROM noc_events WHERE ended_at IS NULL ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r["entity_key"]: {"state": r["state"], "started_at": r["started_at"]} for r in rows}
+
+
 def close_stale_open_events(valid_keys: Optional[set] = None, close_at: Optional[str] = None):
     """Dipanggil sekali saat startup: entity yang event-nya masih 'terbuka' dari
     sesi sebelumnya ditutup biar nggak nyangkut selamanya. `close_at` = waktu

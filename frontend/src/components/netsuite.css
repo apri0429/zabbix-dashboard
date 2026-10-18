@@ -607,8 +607,8 @@ textarea {
 /* Tombol kembali ke atas, muncul di semua halaman saat di-scroll. */
 .ns-totop {
   position: fixed;
-  right: 20px;
-  bottom: 24px;
+  right: 28px;
+  bottom: 80px; /* di atas tombol chat melayang (42px + jarak 10px) */
   z-index: 150;
   display: inline-flex;
   align-items: center;

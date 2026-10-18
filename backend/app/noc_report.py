@@ -7,7 +7,7 @@ Sumber data:
 - Zabbix (app.build_summary): pemakaian bandwidth per site (rata-rata, puncak, % utilisasi).
 - MikroTik DHCP (app._noc_client_counts): jumlah klien aktif — snapshot saat laporan dibuat.
 
-Ringkasan Bahasa Indonesia dibuat oleh Gemini (atau Claude). Kalau tidak ada
+Ringkasan Bahasa Indonesia dibuat oleh Hermes (hermes_ai.py) atau Claude. Kalau tidak ada
 API key, PDF tetap dibuat tanpa bagian ringkasan.
 
 Dipakai dari app.py:
@@ -26,14 +26,13 @@ from typing import Dict, List, Optional, Tuple
 import requests
 
 try:
-    from . import noc_history
+    from . import noc_history, hermes_ai
 except ImportError:
     import noc_history
+    import hermes_ai
 
 BASE_OUTPUT_DIR = os.getenv("BASE_OUTPUT_DIR", r"C:\Zabbix")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("NOC_REPORT_GEMINI_MODEL", "gemini-3.6-flash").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 NOC_REPORT_MODEL = os.getenv("NOC_REPORT_MODEL", "claude-opus-5").strip()
 
@@ -575,52 +574,16 @@ def _narrative_prompt(data: Dict) -> str:
 
 def generate_narrative(data: Dict) -> Optional[str]:
     prompt = _narrative_prompt(data)
-    if GEMINI_API_KEY:
-        out = _narrative_gemini(prompt)
+    if hermes_ai.enabled():
+        out = hermes_ai.complete(_SYSTEM_PROMPT, prompt)
         if out:
             return out
     if ANTHROPIC_API_KEY:
         out = _narrative_anthropic(prompt)
         if out:
             return out
-    logging.info("NOC report: tidak ada GEMINI_API_KEY / ANTHROPIC_API_KEY — ringkasan AI dilewati")
+    logging.info("NOC report: Hermes belum dikonfigurasi / ANTHROPIC_API_KEY kosong — ringkasan AI dilewati")
     return None
-
-
-def _narrative_gemini(prompt: str) -> Optional[str]:
-    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{GEMINI_MODEL}:generateContent")
-    body = {
-        "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 4096,
-            "thinkingConfig": {"thinkingLevel": "medium"},
-        },
-    }
-    try:
-        r = requests.post(url, params={"key": GEMINI_API_KEY}, json=body, timeout=60)
-        if r.status_code == 400 and "thinkingConfig" in body["generationConfig"]:
-            body["generationConfig"].pop("thinkingConfig", None)
-            r = requests.post(url, params={"key": GEMINI_API_KEY}, json=body, timeout=60)
-        if r.status_code >= 400:
-            logging.warning("NOC report: Gemini HTTP %s %s", r.status_code, r.text[:500])
-            return None
-        payload = r.json()
-        cands = payload.get("candidates") or []
-        if not cands:
-            logging.warning("NOC report: Gemini tanpa candidates — %s", str(payload)[:500])
-            return None
-        c0 = cands[0]
-        text = "".join(p.get("text", "") for p in c0.get("content", {}).get("parts", []) or []).strip()
-        if not text:
-            logging.warning("NOC report: Gemini teks kosong (finishReason=%s)", c0.get("finishReason"))
-            return None
-        return text
-    except Exception:
-        logging.exception("NOC report: gagal membuat ringkasan (Gemini)")
-        return None
 
 
 def _narrative_anthropic(prompt: str) -> Optional[str]:
