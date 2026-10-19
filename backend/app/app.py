@@ -3805,6 +3805,9 @@ def _format_noc_alert(change: Dict) -> str:
 
 
 _WA_LAST_SEND: Dict[str, object] = {}   # hasil kirim WA terakhir (untuk /api/noc/wa/status)
+# Jejak polling NOC untuk diagnosa jarak jauh lewat /api/noc/wa/status: kapan
+# polling terakhir jalan dan error terakhir di tahap pencatatan / alert.
+_NOC_POLL_DIAG: Dict[str, object] = {}
 
 
 def _send_whatsapp_message(message: str) -> bool:
@@ -4316,11 +4319,15 @@ def _poll_noc_history():
                 entities.append({"kind": "device", "key": key, "name": name, "state": "UNKNOWN",
                                  "cause": "router site tidak bisa dibaca"})
 
+    _NOC_POLL_DIAG["last_poll_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         transitions = noc_history.record_snapshot(entities)
         _send_noc_alerts(transitions, entities)  # tetap dipanggil walau kosong: cek down yg sudah lewat batas
+        _NOC_POLL_DIAG["last_alert_ok_at"] = _NOC_POLL_DIAG["last_poll_at"]
     except Exception:
         traceback.print_exc()
+        _NOC_POLL_DIAG["last_alert_error_at"] = _NOC_POLL_DIAG["last_poll_at"]
+        _NOC_POLL_DIAG["last_alert_error"] = traceback.format_exc()[-1500:]
 
     try:
         _check_noc_health(payload)
@@ -4383,6 +4390,8 @@ def api_noc_wa_status():
     now = time.time()
     return {
         "success": True,
+        "pid": os.getpid(),
+        "poll": _NOC_POLL_DIAG or None,
         "enabled": WA_ALERT_ENABLED,
         "mode": WA_ALERT_MODE,
         "recipients": len(WA_TO),
@@ -4393,6 +4402,8 @@ def api_noc_wa_status():
             "down_since": e["change"].get("changed_at"),
             "down_seconds": int(now - e["since"]),
             "notified": e["notified"],
+            "up_since": (datetime.datetime.fromtimestamp(e["up_since"]).strftime("%H:%M:%S")
+                         if e.get("up_since") else None),
             "send_in_seconds": max(0, int(e["since"] + WA_ALERT_MIN_DOWN_SECONDS - now)) if not e["notified"] else 0,
             "retry_at": (datetime.datetime.fromtimestamp(e["retry_at"]).strftime("%H:%M:%S")
                          if e.get("retry_at") else None),
