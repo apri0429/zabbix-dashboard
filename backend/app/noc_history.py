@@ -23,7 +23,7 @@ dua hal berikut diterapkan tiap kali dibaca (lihat _clean_incident_rows):
   insiden yang sebenarnya cuma satu (misalnya mati dari jam 4 sore) tidak
   terpotong-potong jadi banyak baris pendek gara-gara sempat "UP" sesaat.
 - Sesudah digabung, insiden yang SUDAH SELESAI dan durasinya masih di bawah
-  MIN_INCIDENT_SECONDS (default 15 menit, env NOC_MIN_INCIDENT_SECONDS) tidak
+  MIN_INCIDENT_SECONDS (default = WA_ALERT_MIN_DOWN_SECONDS / 5 menit, env NOC_MIN_INCIDENT_SECONDS) tidak
   ditampilkan/dihitung sebagai insiden.
   Insiden yang masih berlangsung tidak pernah dibuang oleh aturan ini.
 """
@@ -520,17 +520,27 @@ def _env_seconds(name: str, default: int) -> int:
         return default
 
 
-MIN_INCIDENT_SECONDS = _env_seconds("NOC_MIN_INCIDENT_SECONDS", 900)
+# SATU ambang untuk SEMUA keluaran: alert WA DOWN/UP, Network Log, PDF & rekap
+# WA mingguan, email harian, statistik NOC, dan chat. Dulu WA memakai 5 menit
+# sementara log/laporan 15 menit, sehingga gangguan 5-14 menit dikirim di WA tapi
+# tidak pernah muncul di laporan. Kalau NOC_MIN_INCIDENT_SECONDS tidak diisi,
+# dipakai WA_ALERT_MIN_DOWN_SECONDS (pengaturan lama), lalu 300 dtk.
+MIN_INCIDENT_SECONDS = _env_seconds("NOC_MIN_INCIDENT_SECONDS",
+                                    _env_seconds("WA_ALERT_MIN_DOWN_SECONDS", 300))
 
-# Ambang khusus LAPORAN (PDF & rekap WA). Default sama dengan dashboard.
-REPORT_MIN_INCIDENT_SECONDS = _env_seconds("NOC_REPORT_MIN_INCIDENT_SECONDS", MIN_INCIDENT_SECONDS)
+# Nama lama, dipertahankan supaya pemanggil yang ada tetap jalan. Sengaja TIDAK
+# bisa diatur terpisah lagi: laporan harus sama dengan WA & log.
+REPORT_MIN_INCIDENT_SECONDS = MIN_INCIDENT_SECONDS
 
 # Dua kejadian DOWN berurutan milik entity yang sama, kalau jeda UP di antaranya
 # lebih pendek dari ini, dianggap satu insiden yang sama yang cuma sempat "kedip"
 # nyala sebentar (mis. balas 1 ping pas baru boot) — digabung jadi satu supaya
 # durasi mati sebenarnya (dari kejadian pertama sampai bener-bener pulih) tidak
 # terpotong-potong & log-nya akurat.
-FLAP_MERGE_GAP_SECONDS = 90
+# Sama persis dengan aturan WA: UP baru dikirim sesudah hidup stabil selama ini;
+# mati lagi sebelum itu = gangguan yang sama (lihat WA_ALERT_MIN_UP_SECONDS di app.py).
+FLAP_MERGE_GAP_SECONDS = _env_seconds("NOC_FLAP_MERGE_SECONDS",
+                                      _env_seconds("WA_ALERT_MIN_UP_SECONDS", 120))
 
 
 def _merge_flaps(rows: List[sqlite3.Row]) -> List[Dict]:
@@ -752,6 +762,182 @@ def get_downtime_log_range(start_dt: datetime.datetime, end_dt: datetime.datetim
     return out
 
 
+def get_unmonitored_range(start_dt: datetime.datetime, end_dt: datetime.datetime,
+                          kind: Optional[str] = "device",
+                          min_seconds: int = MIN_INCIDENT_SECONDS) -> List[Dict]:
+    """Periode sebuah entity TIDAK TERPANTAU di window [start_dt, end_dt): tidak ada
+    status UP/DOWN yang tercatat untuknya, padahal backend sedang hidup. Biasanya
+    karena router site-nya tidak bisa dibaca (Netwatch-nya ikut hilang) atau
+    entity-nya dihapus dari Netwatch. Tanpa ini, periode itu terbaca "100% hidup".
+
+    Blackout backend TIDAK dihitung di sini (sudah dilaporkan terpisah lewat
+    get_coverage). Pemantauan sebuah entity dianggap mulai sejak event pertamanya,
+    jadi perangkat yang baru ditambahkan tidak dianggap "tidak terpantau" sebelum
+    ada. Periode lebih pendek dari `min_seconds` diabaikan (ambang sama dengan
+    insiden DOWN)."""
+    init_db()
+    now_dt = datetime.datetime.now()
+    win_start = start_dt
+    win_end = min(end_dt, now_dt)
+    if win_end <= win_start:
+        return []
+    lo = win_start.strftime(_FMT)
+    hi = win_end.strftime(_FMT)
+    conn = _connect()
+    try:
+        q = ("SELECT kind, entity_key, entity_name, state, started_at, ended_at FROM noc_events "
+             "WHERE started_at < ? AND (ended_at IS NULL OR ended_at >= ?)")
+        params: List = [hi, lo]
+        if kind:
+            q += " AND kind = ?"
+            params.append(kind)
+        rows = conn.execute(q + " ORDER BY started_at", params).fetchall()
+        firsts = {r["entity_key"]: r["first"] for r in conn.execute(
+            "SELECT entity_key, MIN(started_at) AS first FROM noc_events GROUP BY entity_key").fetchall()}
+    finally:
+        conn.close()
+
+    blackouts = [(_dt(b["started_at"]), _dt(b["ended_at"]))
+                 for b in get_blackouts_range(win_start, win_end)]
+
+    def _gaps(track_from, spans):
+        out_g, cur = [], track_from
+        for s, t in sorted(spans):
+            if t <= cur:
+                continue
+            if s > cur:
+                out_g.append((cur, s))
+            cur = max(cur, t)
+        if cur < win_end:
+            out_g.append((cur, win_end))
+        # Terbaca sesaat di tengah (<= FLAP_MERGE_GAP_SECONDS) = masih satu
+        # periode yang sama, sama seperti aturan penggabungan insiden DOWN.
+        merged_g = []
+        for gs, ge in out_g:
+            if merged_g and (gs - merged_g[-1][1]).total_seconds() <= FLAP_MERGE_GAP_SECONDS:
+                merged_g[-1] = (merged_g[-1][0], ge)
+            else:
+                merged_g.append((gs, ge))
+        return merged_g
+
+    # Rentang router site tidak bisa dibaca: entri "<site> (gagal dibaca)" (data
+    # lama) atau entitas "Router <site>" yang DOWN/UNKNOWN. Selama itu SEMUA
+    # perangkat di site tersebut tidak terpantau, walau event terakhirnya masih
+    # tercatat UP (dulu event itu dibiarkan terbuka).
+    site_fail: Dict[str, List[Tuple[datetime.datetime, datetime.datetime]]] = {}
+    for r in rows:
+        key = r["entity_key"]
+        loc = key.split(":")[1] if key.count(":") >= 2 else ""
+        failed = (key.endswith("(gagal dibaca)")
+                  or ((r["entity_name"] or "").startswith("Router ") and r["state"] in ("DOWN", "UNKNOWN")))
+        if failed and loc:
+            s = max(_dt(r["started_at"]), win_start)
+            t = min(_dt(r["ended_at"]) if r["ended_at"] else now_dt, win_end)
+            if t > s:
+                site_fail.setdefault(loc, []).append((s, t))
+
+    by_key: Dict[str, Dict] = {}
+    for r in rows:
+        key = r["entity_key"]
+        if _category(key) is None:      # entri semu "(gagal dibaca)" dll.
+            continue
+        if (r["entity_name"] or "").startswith("Router "):
+            continue                    # router-nya sendiri: dicatat sebagai DOWN, bukan "tidak terpantau"
+        e = by_key.setdefault(key, {"kind": r["kind"], "name": r["entity_name"], "covered": [], "unknown": []})
+        e["name"] = r["entity_name"]
+        s = max(_dt(r["started_at"]), win_start)
+        t = min(_dt(r["ended_at"]) if r["ended_at"] else now_dt, win_end)
+        if t <= s:
+            continue
+        if r["state"] == "UNKNOWN":
+            e["unknown"].append((s, t))
+            continue
+        # Potong bagian yang jatuh saat router site-nya tidak bisa dibaca.
+        pieces = [(s, t)]
+        for fs, ft in site_fail.get(key.split(":")[1], []):
+            nxt = []
+            for ps, pt in pieces:
+                if ft <= ps or fs >= pt:
+                    nxt.append((ps, pt))
+                    continue
+                if fs > ps:
+                    nxt.append((ps, fs))
+                if ft < pt:
+                    nxt.append((ft, pt))
+            pieces = nxt
+        e["covered"].extend(pieces)
+
+    out: List[Dict] = []
+    ongoing_cut = now_dt - datetime.timedelta(seconds=1)
+
+    # Celah pemantauan MENYELURUH: tidak satu pun entity tercatat (backend macet,
+    # pembacaan Netwatch semua router gagal, dsb.) padahal tidak tercatat sebagai
+    # blackout. Dilaporkan SEKALI sebagai satu kejadian, bukan per perangkat.
+    all_covered = [sp for e in by_key.values() for sp in e["covered"]]
+    global_gaps = []
+    if all_covered:
+        first_seen = max(win_start, min(s for s, _ in all_covered))
+        for gs, ge in _gaps(first_seen, all_covered + blackouts):
+            global_gaps.append((gs, ge))
+            sec = int((ge - gs).total_seconds())
+            if sec >= min_seconds:
+                out.append({
+                    "kind": kind or "device", "key": "*", "name": "Semua perangkat",
+                    "category": None, "location": "",
+                    "from": gs.strftime(_FMT),
+                    "to": None if ge >= ongoing_cut else ge.strftime(_FMT),
+                    "seconds": sec, "ongoing": ge >= ongoing_cut,
+                    "reason": "pemantauan terhenti total",
+                })
+
+    for key, e in by_key.items():
+        track_from = max(win_start, _dt(firsts.get(key) or lo))
+        gaps = _gaps(track_from, e["covered"] + blackouts + global_gaps)
+        for gs, ge in gaps:
+            sec = int((ge - gs).total_seconds())
+            if sec < min_seconds:
+                continue
+            # Status UNKNOWN tercatat = entity masih dilaporkan tapi statusnya tak
+            # terbaca; tidak ada event sama sekali = entity hilang dari Netwatch
+            # (router site tidak bisa dibaca, atau entity-nya dihapus).
+            unknown = any(us < ge and ut > gs for us, ut in e["unknown"])
+            loc = key.split(":")[1]
+            router_fail = any(fs < ge and ft > gs for fs, ft in site_fail.get(loc, []))
+            out.append({
+                "kind": e["kind"], "key": key, "name": e["name"],
+                "category": _category(key),
+                "location": key.split(":")[1] if key.count(":") >= 2 else "",
+                "from": gs.strftime(_FMT),
+                "to": None if ge >= ongoing_cut else ge.strftime(_FMT),
+                "seconds": sec,
+                "ongoing": ge >= ongoing_cut,
+                "reason": ("router site tidak terbaca" if router_fail
+                           else "status Netwatch tidak terbaca" if unknown else "hilang dari Netwatch"),
+            })
+    out.sort(key=lambda x: (x["from"], x["name"]))
+    return out
+
+
+def summarize_unmonitored(periods: List[Dict]) -> List[Dict]:
+    """Kelompokkan periode tidak terpantau per lokasi + rentang waktu yang sama
+    (mis. semua perangkat RBK hilang bersamaan karena router-nya tak terbaca),
+    supaya laporan menulis satu baris per kejadian, bukan satu per perangkat."""
+    groups: Dict[Tuple[str, str, Optional[str]], Dict] = {}
+    for p in periods:
+        # Dibulatkan ke menit: perangkat satu router hilang di polling yang sama.
+        k = (p["location"], p["from"][:16], (p["to"] or "")[:16] or None)
+        g = groups.setdefault(k, {"location": p["location"], "from": p["from"], "to": p["to"],
+                                  "seconds": p["seconds"], "ongoing": p["ongoing"],
+                                  "names": [], "reason": p["reason"]})
+        g["names"].append(p["name"])
+        g["seconds"] = max(g["seconds"], p["seconds"])
+    out = list(groups.values())
+    for g in out:
+        g["count"] = len(g["names"])
+    out.sort(key=lambda g: (g["from"], g["location"]))
+    return out
+
+
 # Insiden yang dikirim ke browser dibatasi PER KATEGORI (terbaru dulu): ribuan baris
 # cuma memberatkan transfer & render, dan tanpa pemisahan kategori, insiden ISP yang
 # jarang bisa tergeser oleh banyaknya insiden perangkat.
@@ -788,14 +974,27 @@ def _category(key: str) -> Optional[str]:
     return None
 
 
+def last_full_week_range(ref: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
+    """7 hari penuh terakhir sampai kemarin: [ref-7 hari 00:00, ref 00:00). Periode
+    yang SAMA dipakai PDF & rekap WA mingguan (noc_report) dan pilihan "Minggu lalu"
+    di Network Log, supaya angkanya bisa dicocokkan satu-satu."""
+    ref = ref or datetime.date.today()
+    end = datetime.datetime.combine(ref, datetime.time())
+    return end - datetime.timedelta(days=7), end
+
+
 def get_network_overview(days: int = 7) -> Dict:
     """Ringkasan + daftar insiden ISP dan perangkat LAN untuk `days` hari terakhir,
     plus cakupan pemantauan supaya angka uptime tidak terbaca lebih pasti dari
     kenyataan (jam saat backend mati tidak terekam). Tiap entity dan insiden diberi
-    `category` ("isp" | "device") supaya tampilan bisa menyaringnya."""
+    `category` ("isp" | "device") supaya tampilan bisa menyaringnya.
+    days=0 = minggu lalu penuh, periode yang sama dengan laporan mingguan."""
     init_db()
-    now_dt = datetime.datetime.now()
-    start_dt = now_dt - datetime.timedelta(days=days)
+    if days <= 0:
+        start_dt, now_dt = last_full_week_range()
+    else:
+        now_dt = datetime.datetime.now()
+        start_dt = now_dt - datetime.timedelta(days=days)
 
     conn = _connect()
     try:
@@ -817,6 +1016,16 @@ def get_network_overview(days: int = 7) -> Dict:
     longest: Dict[str, int] = {}
     for x in log:
         longest[x["key"]] = max(longest.get(x["key"], 0), x["duration_seconds"])
+
+    # Periode tidak terpantau per entity (router site tak terbaca, status Netwatch
+    # tak terbaca) + pemantauan terhenti total (key "*"). Ditampilkan di riwayat
+    # sebagai kejadian tersendiri supaya tidak terbaca "100% hidup".
+    unmon_all = get_unmonitored_range(start_dt, now_dt)
+    monitoring_gaps = [p for p in unmon_all if p["key"] == "*"]
+    unmon = [p for p in unmon_all if p["key"] != "*"]
+    unmon_by_key: Dict[str, int] = {}
+    for p in unmon:
+        unmon_by_key[p["key"]] = unmon_by_key.get(p["key"], 0) + p["seconds"]
 
     has_log = {x["key"] for x in log}
     entities = []
@@ -842,6 +1051,7 @@ def get_network_overview(days: int = 7) -> Dict:
             "downtime_seconds": st["downtime_seconds"] if st else 0,
             "mttr_seconds": st["mttr_seconds"] if st else None,
             "longest_seconds": longest.get(key, 0),
+            "unmonitored_seconds": unmon_by_key.get(key, 0),
         })
     entities.sort(key=lambda e: (e["category"] != "isp", e["location"].lower(), e["name"].lower()))
 
@@ -860,6 +1070,14 @@ def get_network_overview(days: int = 7) -> Dict:
         "entities": entities,
         "incident_totals": totals,
         "incidents": shown,
+        "unmonitored": [{
+            "type": "unmonitored", "kind": p["kind"], "key": p["key"], "name": p["name"],
+            "category": p["category"], "down_at": p["from"], "up_at": p["to"],
+            "duration_seconds": p["seconds"], "ongoing": p["ongoing"],
+            "duration_certain": True, "reason": p["reason"],
+        } for p in sorted(unmon, key=lambda p: p["from"], reverse=True)[:NETWORK_MAX_INCIDENTS_PER_CATEGORY]],
+        "monitoring_gaps": [{"from": p["from"], "to": p["to"], "seconds": p["seconds"],
+                             "ongoing": p["ongoing"]} for p in monitoring_gaps],
         "coverage": get_coverage(start_dt, now_dt),
     }
 
@@ -873,6 +1091,23 @@ def get_open_entity_keys() -> set:
     finally:
         conn.close()
     return {r["entity_key"] for r in rows}
+
+
+def get_recent_entities(prefix: str, days: int = 7) -> Dict[str, str]:
+    """{entity_key: nama terakhir} untuk entity ber-key `prefix`* yang tercatat dalam
+    `days` hari terakhir. Dipakai untuk menandai perangkat di belakang router yang
+    sedang tidak bisa dibaca sebagai UNKNOWN (tidak terpantau)."""
+    init_db()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT entity_key, entity_name FROM noc_events WHERE entity_key LIKE ? "
+            "AND (ended_at IS NULL OR ended_at >= ?) ORDER BY id",
+            (prefix.replace("%", "") + "%", _cutoff_iso(days)),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r["entity_key"]: r["entity_name"] for r in rows if _category(r["entity_key"])}
 
 
 def get_open_events() -> Dict[str, Dict]:

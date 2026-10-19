@@ -66,10 +66,7 @@ def previous_month(today: Optional[datetime.date] = None) -> Tuple[int, int]:
 def _week_range(ref: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
     """7 hari penuh terakhir sampai kemarin: [ref-7 hari 00:00, ref 00:00).
     Kalau dijalankan hari Senin (jadwal otomatis), otomatis pas Senin-Minggu."""
-    ref = ref or datetime.date.today()
-    end = datetime.datetime.combine(ref, datetime.time())
-    start = end - datetime.timedelta(days=7)
-    return start, end
+    return noc_history.last_full_week_range(ref)  # sama dengan "Minggu lalu" di Network Log
 
 
 def _short(label: str) -> str:
@@ -307,7 +304,8 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
     trend_ok = (cov_pct is not None and prev_cov_pct is not None
                 and cov_pct >= COVERAGE_TREND_PCT and prev_cov_pct >= COVERAGE_TREND_PCT)
 
-    # Laporan hanya memuat mati >= 10 menit (REPORT_MIN_INCIDENT_SECONDS); kedipan lebih
+    # Laporan hanya memuat mati >= MIN_INCIDENT_SECONDS (ambang yang sama dengan WA &
+    # Network Log); kedipan lebih
     # pendek tidak dihitung di uptime, jumlah insiden, log, maupun total downtime.
     _min = noc_history.REPORT_MIN_INCIDENT_SECONDS
     sites = noc_history.get_uptime_stats_range(start, end, kind="site", min_seconds=_min)
@@ -359,10 +357,28 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
         for i in isp_dev
     ]
     isp_downtime = sum(i["duration_seconds"] for i in isp_dev)
+    # Router site yang tidak terjangkau dipisah dari "perangkat lain": satu
+    # kejadian ini berarti SATU SITE putus, bukan satu AP/switch.
+    router_dev = [i for i in device_incidents
+                  if (i["name"] or "").startswith("Router ") and i not in isp_dev]
+    router_incidents = [
+        {"name": i["name"], "down_at": i["down_at"], "up_at": i["up_at"],
+         "duration_seconds": i["duration_seconds"], "ongoing": i["ongoing"]}
+        for i in sorted(router_dev, key=lambda i: i["down_at"] or "")
+    ]
+    # Periode TIDAK TERPANTAU (router site tak terbaca, status Netwatch tak
+    # terbaca, pemantauan terhenti). Tanpa ini periode itu terbaca "100% hidup".
+    unmon_periods = noc_history.get_unmonitored_range(start, end, min_seconds=_min)
+    unmonitored = noc_history.summarize_unmonitored(unmon_periods)
+    unmon_by_key: Dict[str, int] = {}
+    for p in unmon_periods:
+        unmon_by_key[p["key"]] = unmon_by_key.get(p["key"], 0) + p["seconds"]
     isp_links = _isp_link_stats(start, end)
+    for l in isp_links:
+        l["unmonitored_seconds"] = unmon_by_key.get(l["key"], 0)
     isp_uptime = _avg_uptime(isp_links)
     prev_isp_uptime = _avg_uptime(_isp_link_stats(prev_start, prev_end)) if trend_ok else None
-    other_device_incidents = len(device_incidents) - len(isp_dev)
+    other_device_incidents = len(device_incidents) - len(isp_dev) - len(router_dev)
 
     up_vals = [s["uptime_pct"] for s in sites if s.get("uptime_pct") is not None]
     avg_uptime = round(sum(up_vals) / len(up_vals), 3) if up_vals else None
@@ -394,6 +410,8 @@ def _build_period_data(start: datetime.datetime, end: datetime.datetime,
         "isp_downtime_seconds": isp_downtime,
         "isp_downtime_human": _fmt_dur(isp_downtime),
         "other_device_incidents": other_device_incidents,
+        "router_incidents": router_incidents,
+        "unmonitored": unmonitored,
         "sites": sites,
         "flapping_devices": flapping,
         "worst_site": worst,
@@ -483,6 +501,16 @@ def _narrative_prompt(data: Dict) -> str:
         f"Internet/ISP mati: {len(data['isp_incidents'])}x, total {data['isp_downtime_human']}. "
         f"Insiden perangkat lain (bukan ISP): {data['other_device_incidents']}.",
     ]
+    if data.get("router_incidents"):
+        lines.append("Router site tidak terjangkau (satu site putus total): " + "; ".join(
+            f"{r['name']} {_fmt_dur(r['duration_seconds'])}{' (MASIH)' if r['ongoing'] else ''}"
+            for r in data["router_incidents"]) + ".")
+    if data.get("unmonitored"):
+        lines.append(
+            "PERIODE TIDAK TERPANTAU (status perangkat tidak diketahui, BUKAN berarti hidup; "
+            "uptime perangkat ini hanya batas atas - JANGAN sebut stabil/100%): " + "; ".join(
+                f"{u['location'] or 'semua perangkat'} {_fmt_dur(u['seconds'])} ({u['reason']})"
+                for u in data["unmonitored"][:10]) + ".")
     if not data.get("coverage_ok") and data.get("coverage_pct") is not None:
         cov = data["coverage"]
         lines.append(
@@ -716,7 +744,7 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
         head += (
             f"⚠️ *Data belum lengkap*\n"
             f"_Pemantauan hanya aktif {data['coverage_pct']:.1f}% periode ini "
-            f"({cov['blackout_count']}x jeda, {cov['blackout_seconds']/3600:.0f} jam mati). "
+            f"({cov['blackout_count']}x jeda, {cov['blackout_seconds']/3600:.1f} jam tidak terpantau). "
             f"Angka di bawah adalah batas bawah — gangguan saat pemantauan mati "
             f"tidak tercatat._\n"
             "━━━━━━━━━━━━━━\n"
@@ -737,7 +765,11 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
         head += "\n\n🌐 *Uptime per Link ISP*"
         for l in links:
             ic = "🟢" if (l["uptime_pct"] or 0) >= 99.9 else ("🟠" if (l["uptime_pct"] or 0) >= 99 else "🔴")
-            head += f"\n{ic} {l['name']}: {_fmt_pct(l['uptime_pct'])}"
+            um = l.get("unmonitored_seconds") or 0
+            if um:
+                ic = "⚪"  # sebagian periode tidak terpantau: uptime-nya hanya batas atas
+            head += (f"\n{ic} {l['name']}: {_fmt_pct(l['uptime_pct'])}"
+                     + (f" _(tidak terpantau {_fmt_dur(um)})_" if um else ""))
     if isp:
         head += "\n\n🔴 *Detail Internet Mati*"
         for i in isp[:10]:
@@ -756,6 +788,23 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
                      "bukan dari pemantauan langsung — anggap sebagai perkiraan._")
     else:
         head += "\n\n✅ *Internet mati:* tidak ada"
+    routers = data.get("router_incidents") or []
+    if routers:
+        head += "\n\n📡 *Router Site Tidak Terjangkau*"
+        for r in routers:
+            up = _fmt_dt_id(r["up_at"]) if r["up_at"] else "masih putus"
+            head += (f"\n• {r['name']}: {_fmt_dt_id(r['down_at'])} ➜ {up} "
+                     f"({_fmt_dur(r['duration_seconds'])})")
+    unmon = data.get("unmonitored") or []
+    if unmon:
+        head += "\n\n⚪ *Periode Tidak Terpantau* _(status tidak diketahui, bukan berarti hidup)_"
+        for u in unmon[:8]:
+            to = _fmt_dt_id(u["to"]) if u["to"] else "sekarang"
+            who = f"{u['location']} ({u['count']} perangkat)" if u["location"] else "Semua perangkat"
+            head += (f"\n• {who}: {_fmt_dt_id(u['from'])} ➜ {to} "
+                     f"({_fmt_dur(u['seconds'])}) — {u['reason']}")
+        if len(unmon) > 8:
+            head += f"\n• _... +{len(unmon) - 8} lagi (lihat PDF)_"
     flap = data.get("flapping_devices") or []
     if flap:
         head += "\n\n🔁 *Perangkat Sering Putus-Nyambung*"

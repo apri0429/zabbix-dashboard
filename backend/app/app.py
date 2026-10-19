@@ -1772,7 +1772,8 @@ def report_coverage(start_dt: datetime.datetime,
 def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.datetime,
              output_path: str = REPORT_PATH, ai_summary: Optional[str] = None,
              isp_incidents: Optional[List[Dict]] = None,
-             coverage: Optional[Dict] = None, report_title: Optional[str] = None):
+             coverage: Optional[Dict] = None, report_title: Optional[str] = None,
+             noc_data: Optional[Dict] = None):
     pdf = PDF()
     # Leave room for the PNM letterhead (top) and decorative footer (bottom)
     pdf.set_top_margin(PNM_HEADER_H + 9)
@@ -1907,7 +1908,9 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.set_text_color(*_C_MUTED)
         pdf.multi_cell(0, 4.2,
             "Daftar kejadian internet/ISP mati berdasarkan pemantauan Netwatch MikroTik "
-            "pada periode ini. Gangguan di bawah 10 menit tidak dicatat sebagai kejadian.", align="L")
+            "pada periode ini. Gangguan di bawah "
+            f"{max(1, round(noc_history.MIN_INCIDENT_SECONDS / 60))} menit tidak dicatat sebagai kejadian "
+            "(sama dengan ambang alert WhatsApp).", align="L")
         pdf.ln(2)
         if not isp_incidents:
             pdf.set_font("Helvetica", "B", 8.5)
@@ -1962,6 +1965,122 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
                     "perangkat bisa saja sempat pulih di tengah jeda tanpa tercatat.",
                     align="L")
                 pdf.set_text_color(*_C_BODY)
+        pdf.ln(4)
+
+    # ── Uptime per link ISP & gangguan perangkat lain (rekap periodik) ──
+    # Isinya SAMA dengan rekap WhatsApp (noc_report._wa_text): data yang sama,
+    # urutan yang sama, supaya WA dan PDF bisa dicocokkan satu-satu.
+    if noc_data:
+        _lat = noc_report._lat1
+        _links = noc_data.get("isp_links") or []
+        if _links:
+            pdf.section_title("Uptime per Link ISP")
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(*_C_NAVY)
+            pdf.cell(0, 6, f"Uptime internet rata-rata: {noc_report._fmt_pct(noc_data.get('isp_uptime_pct'))}"
+                           f"  |  {len(_links)} link terpantau",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            _CW = [78, 26, 26, 30, 30]   # sum = 190
+            pdf.table_header(_CW, ["Link ISP", "Uptime", "Kali Mati", "Total Mati", "Tdk Terpantau"], 7)
+            pdf.set_font("Helvetica", "", 7.5)
+            for idx, l in enumerate(_links):
+                fill = idx % 2 == 0
+                pdf.set_fill_color(*(_C_GOLD_LT if fill else _C_WHITE))
+                pdf.set_text_color(*_C_BODY)
+                pdf.cell(_CW[0], 7, _lat(l["name"])[:60], border=1, align="L", fill=fill)
+                _u = l.get("uptime_pct") or 0
+                pdf.set_text_color(*((46, 125, 50) if _u >= 99.9 else (138, 97, 0) if _u >= 99 else (198, 40, 40)))
+                pdf.cell(_CW[1], 7, noc_report._fmt_pct(l.get("uptime_pct")), border=1, align="C", fill=fill)
+                pdf.set_text_color(*_C_BODY)
+                pdf.cell(_CW[2], 7, f"{l.get('incidents') or 0}x", border=1, align="C", fill=fill)
+                pdf.cell(_CW[3], 7, noc_report._fmt_dur(l.get("downtime_seconds")) if l.get("incidents") else "-",
+                         border=1, align="C", fill=fill)
+                _um = l.get("unmonitored_seconds") or 0
+                pdf.set_text_color(*((138, 97, 0) if _um else _C_BODY))
+                pdf.cell(_CW[4], 7, noc_report._fmt_dur(_um) if _um else "-",
+                         border=1, align="C", fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            if any(l.get("unmonitored_seconds") for l in _links):
+                pdf.ln(1)
+                pdf.set_font("Helvetica", "I", 7)
+                pdf.set_text_color(138, 97, 0)
+                pdf.multi_cell(0, 4,
+                    "Kolom 'Tdk Terpantau' = lama status link tidak diketahui (router site tidak bisa dibaca "
+                    "atau status Netwatch tidak terbaca). Uptime link tersebut hanya BATAS ATAS: gangguan "
+                    "selama periode itu tidak terlihat. Rinciannya di bagian 'Periode Tidak Terpantau'.",
+                    align="L")
+            pdf.ln(4)
+
+        _routers = noc_data.get("router_incidents") or []
+        if _routers:
+            pdf.section_title("Router Site Tidak Terjangkau")
+            pdf.set_font("Helvetica", "I", 7.4)
+            pdf.set_text_color(*_C_MUTED)
+            pdf.multi_cell(0, 4.2, "Router site tidak membalas lewat VPN: seluruh site putus (VPN, ISP, atau listrik), "
+                                   "bukan satu perangkat.", align="L")
+            _CW = [70, 45, 45, 30]   # sum = 190
+            pdf.table_header(_CW, ["Router", "Putus", "Tersambung", "Durasi"], 7)
+            pdf.set_font("Helvetica", "", 7.5)
+            for idx, r in enumerate(_routers):
+                fill = idx % 2 == 0
+                pdf.set_fill_color(*(_C_GOLD_LT if fill else _C_WHITE))
+                pdf.set_text_color(*_C_BODY)
+                pdf.cell(_CW[0], 7, _lat(r["name"])[:45], border=1, align="L", fill=fill)
+                pdf.cell(_CW[1], 7, noc_report._fmt_dt_id(r["down_at"]), border=1, align="C", fill=fill)
+                pdf.set_text_color(*((200, 30, 30) if r["ongoing"] else _C_BODY))
+                pdf.cell(_CW[2], 7, noc_report._fmt_dt_id(r["up_at"]) if r["up_at"] else "MASIH PUTUS",
+                         border=1, align="C", fill=fill)
+                pdf.set_text_color(*_C_BODY)
+                pdf.cell(_CW[3], 7, noc_report._fmt_dur(r["duration_seconds"]), border=1, align="C",
+                         fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(4)
+
+        _unmon = noc_data.get("unmonitored") or []
+        if _unmon:
+            pdf.section_title("Periode Tidak Terpantau")
+            pdf.set_font("Helvetica", "I", 7.4)
+            pdf.set_text_color(*_C_MUTED)
+            pdf.multi_cell(0, 4.2,
+                "Selama periode ini status perangkat TIDAK DIKETAHUI - bukan berarti hidup. Gangguan yang "
+                "terjadi di dalamnya tidak tercatat, jadi uptime perangkat terkait hanya batas atas.", align="L")
+            _CW = [52, 34, 34, 24, 46]   # sum = 190
+            pdf.table_header(_CW, ["Lokasi / Perangkat", "Mulai", "Selesai", "Durasi", "Penyebab"], 7)
+            pdf.set_font("Helvetica", "", 7.2)
+            for idx, u in enumerate(_unmon):
+                fill = idx % 2 == 0
+                pdf.set_fill_color(*(_C_GOLD_LT if fill else _C_WHITE))
+                pdf.set_text_color(*_C_BODY)
+                _who = (f"{u['location']} ({u['count']} perangkat)" if u["location"] else "Semua perangkat")
+                pdf.cell(_CW[0], 7, _lat(_who)[:36], border=1, align="L", fill=fill)
+                pdf.cell(_CW[1], 7, noc_report._fmt_dt_id(u["from"]), border=1, align="C", fill=fill)
+                pdf.cell(_CW[2], 7, noc_report._fmt_dt_id(u["to"]) if u["to"] else "masih", border=1,
+                         align="C", fill=fill)
+                pdf.cell(_CW[3], 7, noc_report._fmt_dur(u["seconds"]), border=1, align="C", fill=fill)
+                pdf.cell(_CW[4], 7, _lat(u["reason"])[:34], border=1, align="L", fill=fill,
+                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(4)
+
+        _other = noc_data.get("other_device_incidents") or 0
+        _flap = noc_data.get("flapping_devices") or []
+        pdf.section_title("Gangguan Perangkat Lain (Switch / AP)")
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*_C_NAVY)
+        pdf.cell(0, 6, f"{_other} kejadian perangkat lain (bukan ISP) pada periode ini",
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        if _flap:
+            pdf.set_font("Helvetica", "I", 7.4)
+            pdf.set_text_color(*_C_MUTED)
+            pdf.multi_cell(0, 4.2, "Perangkat sering putus-nyambung (3 kali atau lebih):", align="L")
+            _CW = [110, 40, 40]   # sum = 190
+            pdf.table_header(_CW, ["Perangkat", "Kali Putus", "Total Mati"], 7)
+            pdf.set_font("Helvetica", "", 7.5)
+            for idx, x in enumerate(_flap):
+                fill = idx % 2 == 0
+                pdf.set_fill_color(*(_C_GOLD_LT if fill else _C_WHITE))
+                pdf.set_text_color(*_C_BODY)
+                pdf.cell(_CW[0], 7, _lat(x["label"])[:70], border=1, align="L", fill=fill)
+                pdf.cell(_CW[1], 7, f"{x['incidents']}x", border=1, align="C", fill=fill)
+                pdf.cell(_CW[2], 7, noc_report._fmt_dur(x.get("downtime_seconds")), border=1, align="C",
+                         fill=fill, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(4)
 
     # ── Metodologi penilaian ──
@@ -3749,10 +3868,11 @@ def _send_whatsapp_message(message: str) -> bool:
 
 # Alert DOWN baru dikirim kalau mati terus >= WA_ALERT_MIN_DOWN_SECONDS (anti-spam
 # untuk putus sesaat). Kalau sudah pulih sebelum itu, tidak ada WA sama sekali.
-WA_ALERT_MIN_DOWN_SECONDS = int(os.getenv("WA_ALERT_MIN_DOWN_SECONDS", "180"))
+# Diambil dari noc_history supaya WA, Network Log & laporan memakai ambang yang sama.
+WA_ALERT_MIN_DOWN_SECONDS = noc_history.MIN_INCIDENT_SECONDS
 # WA "UP" baru dikirim kalau sudah hidup stabil selama ini. Mati lagi sebelum
 # itu = masih gangguan yang sama, jadi tidak ada WA DOWN/UP berulang.
-WA_ALERT_MIN_UP_SECONDS = int(os.getenv("WA_ALERT_MIN_UP_SECONDS", "120"))
+WA_ALERT_MIN_UP_SECONDS = noc_history.FLAP_MERGE_GAP_SECONDS
 _WA_PENDING_DOWN: Dict[str, Dict] = {}   # key -> {"change", "since", "notified"}
 
 # Pemberitahuan "pemantauan sempat mati" hanya dikirim kalau jedanya cukup lama,
@@ -4072,7 +4192,7 @@ def _close_vanished_noc_entities(payload: Dict, entities: List[Dict]):
     """Tutup event terbuka milik entity yang sudah tidak dilaporkan lagi (site
     dihapus dari ITEM_MAP, host dihapus dari Netwatch), supaya tidak tercatat
     "masih berlangsung" selamanya. Perangkat dari router yang sedang gagal dibaca
-    TIDAK ditutup -- hilangnya cuma karena router-nya tak terjangkau."""
+    TIDAK ditutup -- statusnya dicatat UNKNOWN (lihat _poll_noc_history)."""
     devices = payload.get("devices") or []
     if not devices:
         return  # pembacaan Netwatch gagal total -> jangan tutup apa pun
@@ -4133,6 +4253,20 @@ def _poll_noc_history():
                 continue
             entities.append({"kind": "device", "key": f"device:{r['name']}:{r['host']}",
                              "name": f"Router {r['name']}", "state": "UP", "router": True})
+        # Perangkat di belakang router yang gagal dibaca: statusnya TIDAK diketahui.
+        # Dulu event terakhirnya (biasanya UP) dibiarkan terbuka, sehingga riwayat &
+        # laporan menghitungnya "hidup" padahal tidak terpantau sama sekali.
+        listed = {e["key"] for e in entities}
+        for d in payload["devices"]:
+            if not d.get("router_failed"):
+                continue
+            prefix = f"device:{d.get('router_name') or '-'}:"
+            for key, name in noc_history.get_recent_entities(prefix).items():
+                if key in listed or key == _device_key(d) or (name or "").startswith("Router "):
+                    continue
+                listed.add(key)
+                entities.append({"kind": "device", "key": key, "name": name, "state": "UNKNOWN",
+                                 "cause": "router site tidak bisa dibaca"})
 
     try:
         transitions = noc_history.record_snapshot(entities)
@@ -4235,10 +4369,11 @@ def _cached_overview(kind: str, days: int, builder) -> Dict:
 
 
 @app.get("/api/noc/network")
-def api_noc_network(days: int = Query(7, ge=1, le=365)):
+def api_noc_network(days: int = Query(7, ge=0, le=365)):
     """Catatan jaringan: status terkini, uptime, jumlah & durasi down, dan daftar
     insiden untuk ISP (Netwatch ber-host IP publik) dan perangkat LAN (AP, switch,
-    dll.), dari riwayat SQLite. Tiap entri punya `category` "isp" | "device"."""
+    dll.), dari riwayat SQLite. Tiap entri punya `category` "isp" | "device".
+    days=0 = minggu lalu penuh (Senin-Minggu), sama dengan PDF & rekap WA mingguan."""
     try:
         return _cached_overview("network", days, noc_history.get_network_overview)
     except Exception as e:
@@ -5069,7 +5204,7 @@ def _generate_periodic_report(start_dt: datetime.datetime, end_dt: datetime.date
     pdf_path = os.path.join(BASE_OUTPUT_DIR, pdf_name)
     make_pdf(summary, start_dt, end_dt, pdf_path, ai_summary=narrative,
              isp_incidents=data.get("isp_incidents", []),
-             coverage=data.get("coverage"), report_title=title)
+             coverage=data.get("coverage"), report_title=title, noc_data=data)
     return {
         "pdf_path": pdf_path, "pdf_name": pdf_name,
         "period_label": data["period_label"],

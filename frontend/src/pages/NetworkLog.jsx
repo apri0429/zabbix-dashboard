@@ -29,11 +29,14 @@ const T = {
   primary:   "#2a5db0",
 };
 
+// days 0 = minggu lalu penuh (Senin-Minggu): periode yang sama persis dengan PDF &
+// rekap WA mingguan, supaya angkanya bisa dicocokkan.
 const RANGES = [
-  { days: 1,  label: "24 jam" },
-  { days: 7,  label: "7 hari" },
-  { days: 30, label: "30 hari" },
-  { days: 90, label: "3 bulan" },
+  { days: 1,  label: "24 jam terakhir" },
+  { days: 7,  label: "7 hari terakhir" },
+  { days: 0,  label: "Minggu lalu (sama dengan laporan)", short: "Minggu lalu" },
+  { days: 30, label: "30 hari terakhir" },
+  { days: 90, label: "3 bulan terakhir" },
 ];
 
 const CATS = [
@@ -91,7 +94,8 @@ const quality = (p) => (p == null ? "Belum ada data" : p >= 99.9 ? "Sangat stabi
 const unmonitored = (e) => e.state === "UNKNOWN" || e.state === "INACTIVE";
 const stabilityText = (e) => (unmonitored(e) ? "Tidak terpantau" : quality(e.uptime_pct));
 const stabilityColor = (e) => (unmonitored(e) ? T.muted : uptimeColor(e.uptime_pct));
-const troubleText = (e) => (e.incidents ? `${e.incidents} kali putus, total ${fmtDur(e.downtime_seconds)}` : "Tidak pernah putus");
+const troubleText = (e) => (e.incidents ? `${e.incidents} kali putus, total ${fmtDur(e.downtime_seconds)}` : "Tidak pernah putus")
+  + (e.unmonitored_seconds ? ` · tidak terpantau ${fmtDur(e.unmonitored_seconds)}` : "");
 
 function downloadCsv(filename, rows) {
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -169,7 +173,8 @@ const td = { padding: "8px 12px", fontSize: 13, color: T.text, verticalAlign: "t
 export default function NetworkLog() {
   const isMobile = useIsMobile();
   const [days, setDays] = useState(() => {
-    const d = Number(new URLSearchParams(window.location.search).get("hari"));
+    const raw = new URLSearchParams(window.location.search).get("hari");
+    const d = raw == null || raw === "" ? NaN : Number(raw);
     return RANGES.some((r) => r.days === d) ? d : 7;
   });
   // Pilihan awal bisa lewat URL (?kategori=isp&tampilan=riwayat) supaya tautan bisa dibagikan.
@@ -246,7 +251,10 @@ export default function NetworkLog() {
 
   const incidents = useMemo(() => {
     const keys = new Set(shown.map((e) => e.key));
-    return (data?.incidents || []).filter((x) => keys.has(x.key) && (entityKey === "all" || x.key === entityKey));
+    // Kejadian "tidak terpantau" ikut di riwayat, berurutan dengan kejadian mati.
+    return [...(data?.incidents || []), ...(data?.unmonitored || [])]
+      .filter((x) => keys.has(x.key) && (entityKey === "all" || x.key === entityKey))
+      .sort((a, b) => b.down_at.localeCompare(a.down_at));
   }, [data, shown, entityKey]);
 
   const lastIncident = useMemo(() => {
@@ -260,8 +268,16 @@ export default function NetworkLog() {
   const cov = data?.coverage;
   const lowCoverage = cov && cov.coverage_pct != null && cov.coverage_pct < 99;
   const minMin = data ? Math.round(data.min_incident_seconds / 60) : 15;
-  const rangeLabel = RANGES.find((r) => r.days === days)?.label;
+  const rangeObj = RANGES.find((r) => r.days === days);
+  const rangeLabel = rangeObj?.short || rangeObj?.label;
   const hasUncertain = incidents.some((x) => !x.ongoing && !x.duration_certain);
+  const gaps = data?.monitoring_gaps || [];
+  const gapSeconds = gaps.reduce((s, g) => s + g.seconds, 0);
+  const isUnmon = (x) => x.type === "unmonitored";
+  const kindText = (x) => (isUnmon(x)
+    ? <span style={{ color: T.muted, fontWeight: 700 }}>Tidak terpantau<div style={{ fontWeight: 400, fontSize: 11.5 }}>{x.reason}</div></span>
+    : <span style={{ color: T.bad, fontWeight: 700 }}>Mati</span>);
+  const endText = (x) => (x.ongoing ? (isUnmon(x) ? "Masih tidak terpantau" : "Masih mati") : upText(x));
 
   // Halaman: daftar yang dipakai tabel dipotong sesuai jumlah baris per halaman.
   useEffect(() => { setPage(1); }, [cat, loc, q, sort, days, view, entityKey, perPage]);
@@ -277,15 +293,18 @@ export default function NetworkLog() {
 
   const openHistory = (key) => { setEntityKey(key); setView("riwayat"); };
   const exportCsv = () => {
-    const rows = [["Jenis", "Nama", "Lokasi", "Alamat", "Mulai mati", "Normal lagi", "Durasi (detik)", "Durasi", "Keterangan"]];
+    const rows = [["Jenis", "Nama", "Lokasi", "Alamat", "Kejadian", "Mulai", "Selesai", "Durasi (detik)", "Durasi", "Keterangan"]];
     for (const x of incidents) {
+      const un = x.type === "unmonitored";
       rows.push([
         x.category === "isp" ? "Internet" : "Perangkat", x.name, x.key.split(":")[1], x.key.split(":").pop(),
+        un ? "Tidak terpantau" : "Mati",
         x.down_at, x.ongoing ? "" : x.up_at, x.duration_seconds, fmtDur(x.duration_seconds),
-        x.ongoing ? "Masih mati" : (x.duration_certain ? "" : `Sebagian ${fmtDur(x.unmonitored_seconds)} tidak tercatat`),
+        un ? `${x.reason}${x.ongoing ? " (masih)" : ""}`
+          : x.ongoing ? "Masih mati" : (x.duration_certain ? "" : `Sebagian ${fmtDur(x.unmonitored_seconds)} tidak tercatat`),
       ]);
     }
-    downloadCsv(`catatan-jaringan-${days}hari.csv`, rows);
+    downloadCsv(`catatan-jaringan-${days ? `${days}hari` : "minggu-lalu"}.csv`, rows);
   };
 
   const panel = { background: T.surface, borderRadius: 3, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
@@ -329,7 +348,7 @@ export default function NetworkLog() {
           {kpi.total > 0 && (
             kpi.downNow.length === 0 ? (
               <Alert tone="ok" title="Semua koneksi berjalan normal">
-                {kpi.online} koneksi dipantau. {rangeLabel} terakhir:{" "}
+                {kpi.online} koneksi dipantau. {rangeLabel}:{" "}
                 {kpi.incidents ? `${kpi.incidents} kali putus, total ${fmtDur(kpi.downSeconds)}.` : "tidak ada yang putus."}
               </Alert>
             ) : (
@@ -344,10 +363,20 @@ export default function NetworkLog() {
                   );
                 })}
                 <div style={{ marginTop: 4, color: T.label }}>
-                  {rangeLabel} terakhir: {kpi.incidents} kali putus, total {fmtDur(kpi.downSeconds)}.
+                  {rangeLabel}: {kpi.incidents} kali putus, total {fmtDur(kpi.downSeconds)}.
                 </div>
               </Alert>
             )
+          )}
+
+          {gaps.length > 0 && (
+            <Alert tone="warn" title={`Pemantauan sempat terhenti ${gaps.length} kali (total ${fmtDur(gapSeconds)})`}>
+              Pada waktu itu tidak ada satu pun perangkat yang terbaca, jadi status semua perangkat tidak diketahui:{" "}
+              {gaps.slice(0, 5).map((g, i) => {
+                const a = parseTs(g.from);
+                return <span key={g.from}>{i ? ", " : ""}{a.getDate()} {BULAN[a.getMonth()]} {clock(a)} ({fmtDur(g.seconds)})</span>;
+              })}{gaps.length > 5 ? ", …" : "."}
+            </Alert>
           )}
 
           {lowCoverage && (
@@ -383,7 +412,7 @@ export default function NetworkLog() {
               </Field>
               <Field label="Periode">
                 <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={fieldStyle}>
-                  {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label} terakhir</option>)}
+                  {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
                 </select>
               </Field>
               <Field label="Lokasi">
@@ -500,18 +529,19 @@ export default function NetworkLog() {
                 )}
                 {incidents.length === 0 ? (
                   <div style={{ padding: 24, textAlign: "center", color: T.ok, fontSize: 13, fontWeight: 600 }}>
-                    Tidak ada yang putus pada periode ini.
+                    Tidak ada yang putus atau tidak terpantau pada periode ini.
                   </div>
                 ) : isMobile ? (
                   pageIncidents.map((x, i) => {
                     const a = parseTs(x.down_at);
                     return (
-                      <MItem key={`${x.key}-${x.down_at}`} i={i} title={x.name}
+                      <MItem key={`${x.type || "down"}-${x.key}-${x.down_at}`} i={i} title={x.name}
                         sub={`${x.category === "isp" ? "Internet" : "Perangkat"} · ${x.key.split(":")[1]} · ${dateText(a)}`}
                         right={<b>{fmtDur(x.duration_seconds)}{!x.ongoing && !x.duration_certain && <span style={{ color: T.warn }}> *</span>}</b>}>
                         <MFacts cols={2} items={[
-                          ["Jam mati", clock(a)],
-                          ["Jam hidup", x.ongoing ? <span style={{ color: T.bad }}>Masih mati</span> : upText(x)],
+                          ["Kejadian", kindText(x)],
+                          ["Mulai", clock(a)],
+                          ["Selesai", x.ongoing ? <span style={{ color: isUnmon(x) ? T.muted : T.bad }}>{endText(x)}</span> : upText(x)],
                         ]} />
                       </MItem>
                     );
@@ -521,13 +551,13 @@ export default function NetworkLog() {
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                       <thead>
                         <tr>
-                          {["Tanggal", "Nama", "Lokasi", "Jam mati", "Jam hidup", "Lama"].map((h) => <th key={h} style={th}>{h}</th>)}
+                          {["Tanggal", "Nama", "Lokasi", "Kejadian", "Mulai", "Selesai", "Lama"].map((h) => <th key={h} style={th}>{h}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {pageIncidents.map((x, i) => {
                           const a = parseTs(x.down_at);
-                          const rk = `${x.key}-${x.down_at}`;
+                          const rk = `${x.type || "down"}-${x.key}-${x.down_at}`;
                           return (
                             <tr key={rk} onMouseEnter={() => setHoverRow(rk)} onMouseLeave={() => setHoverRow(null)}
                               style={rowStyle(i, rk, false)}>
@@ -537,9 +567,10 @@ export default function NetworkLog() {
                                 <div style={{ fontSize: 12, color: T.label }}>{x.category === "isp" ? "Internet" : "Perangkat"}</div>
                               </td>
                               <td style={td}>{x.key.split(":")[1]}</td>
+                              <td style={td}>{kindText(x)}</td>
                               <td style={{ ...td, whiteSpace: "nowrap" }}>{clock(a)}</td>
-                              <td style={{ ...td, whiteSpace: "nowrap", color: x.ongoing ? T.bad : T.text, fontWeight: x.ongoing ? 700 : 400 }}>
-                                {x.ongoing ? "Masih mati" : upText(x)}
+                              <td style={{ ...td, whiteSpace: "nowrap", color: x.ongoing ? (isUnmon(x) ? T.muted : T.bad) : T.text, fontWeight: x.ongoing ? 700 : 400 }}>
+                                {endText(x)}
                               </td>
                               <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 600 }}>
                                 {fmtDur(x.duration_seconds)}{!x.ongoing && !x.duration_certain && <span style={{ color: T.warn }}> *</span>}
