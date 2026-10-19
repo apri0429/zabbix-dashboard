@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildApiUrl } from "../api";
 import { MarkerPin01 } from "@untitledui/icons";
 import { NS, PageHeader, Panel, Alert, MItem, fieldStyle, th, td } from "../components/ns";
@@ -58,6 +58,11 @@ export default function LiveBandwidth() {
   const [peakMap, setPeakMap]         = useState({}); // key -> puncak Mbps sejak halaman dibuka
   const [lastUpdate, setLastUpdate]   = useState("");
   const [isMobile, setIsMobile]       = useState(() => window.innerWidth <= 640);
+  // Router yang gagal dibaca (mis. VPN site putus): [{router_id, router_name, error}].
+  // Router lain tetap tampil & terus diperbarui.
+  const [offline, setOffline]         = useState([]);
+  const busyRef = useRef(false);   // jangan tumpuk request kalau yang lama belum selesai
+  const reqSeq  = useRef(0);       // abaikan balasan telat setelah ganti router
 
   const routerOptions = [
     { value: "all", label: "All Routers" },
@@ -74,6 +79,9 @@ export default function LiveBandwidth() {
   }, []);
 
   const fetchEtherTraffic = async (isBackground = false) => {
+    if (isBackground && busyRef.current) return;
+    busyRef.current = true;
+    const seq = ++reqSeq.current;
     try {
       if (isBackground) setRefreshing(true);
       else setLoading(true);
@@ -94,9 +102,11 @@ export default function LiveBandwidth() {
         throw new Error(parsed?.detail || parsed?.message || parsed?.error || rawText || "Gagal mengambil data");
       }
 
+      if (seq !== reqSeq.current) return;
       const rows = Array.isArray(parsed?.data) ? parsed.data : [];
       setData(rows);
-      setLastUpdate(new Date().toLocaleString("en-GB"));
+      setOffline(Array.isArray(parsed?.errors) ? parsed.errors : []);
+      setLastUpdate(new Date().toLocaleTimeString("en-GB"));
 
       setPeakMap((prev) => {
         const next = { ...prev };
@@ -120,11 +130,16 @@ export default function LiveBandwidth() {
         return next;
       });
     } catch (err) {
-      if (!isBackground) setData([]);
+      if (seq !== reqSeq.current) return;
+      // Polling di latar: data terakhir tetap ditampilkan, cukup tampilkan pesan error.
+      if (!isBackground) { setData([]); setOffline([]); }
       setError(err.message || "Terjadi kesalahan");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (seq === reqSeq.current) {
+        busyRef.current = false;
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
@@ -192,7 +207,7 @@ export default function LiveBandwidth() {
     const maybeRouterSep = (router) => {
       if (router?.id === lastRouterId) return;
       lastRouterId = router?.id;
-      result.push({ type: "router-sep", name: router?.name || "Router lain" });
+      result.push({ type: "router-sep", id: router?.id, name: router?.name || "Router lain" });
     };
 
     groupOrder.forEach((key) => {
@@ -218,7 +233,7 @@ export default function LiveBandwidth() {
     let port = null;
     for (const row of groupedRows) {
       if (row.type === "router-sep") {
-        cur = { name: row.name, ports: [] };
+        cur = { id: row.id, name: row.name, ports: [] };
         out.push(cur);
         port = null;
       } else if (row.type === "sep") {
@@ -251,14 +266,17 @@ export default function LiveBandwidth() {
   const visibleSections = useMemo(() => {
     const term = q.trim().toLowerCase();
     const sum = (pt) => pt.rows.reduce((t, r) => t + (Number(r.item.rate) || 0), 0);
-    return sections
+    const online = sections
       .map((sec) => {
         let ports = sec.ports.filter((pt) => !term || pt.name.toLowerCase().includes(term));
         if (sortBy === "fastest") ports = [...ports].sort((a, b) => sum(b) - sum(a));
         return { ...sec, ports };
       })
       .filter((sec) => sec.ports.length > 0);
-  }, [sections, q, sortBy]);
+    // Router offline disisipkan sesuai urutan router (saat tidak sedang mencari port).
+    const down = term ? [] : offline.map((o) => ({ id: o.router_id, name: o.router_name, error: o.error, offline: true }));
+    return [...online, ...down].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  }, [sections, offline, q, sortBy]);
 
   const portCell = (row, trendColor) => {
     if (!row) return <span style={{ color: NS.muted }}>–</span>;
@@ -292,7 +310,7 @@ export default function LiveBandwidth() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: NS.font, color: NS.text }}>
       <PageHeader
         title="Live Bandwidth"
-        subtitle={`Current speed of each MikroTik port · ${refreshing ? "updating…" : `updated ${lastUpdate || "—"}`}`}
+        subtitle={`Current speed of each MikroTik port · updated ${lastUpdate || "—"}${offline.length ? ` · ${offline.length} router offline` : ""}`}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto" }}>
             <input
@@ -313,18 +331,41 @@ export default function LiveBandwidth() {
         }
       />
 
-      {error && <Alert tone="bad" title="Failed to load data">{error}</Alert>}
+      {error && (
+        <Alert tone="bad" title="Failed to load data">
+          {error}{data.length > 0 && " — showing the last data received, retrying every 5 seconds."}
+        </Alert>
+      )}
 
       {loading ? (
         <Panel pad={24}><div style={{ textAlign: "center", color: NS.label, fontSize: 13 }}>Loading bandwidth data…</div></Panel>
-      ) : !error && sections.length === 0 ? (
+      ) : !error && sections.length === 0 && offline.length === 0 ? (
         <Alert tone="info" title="No live bandwidth data">Try selecting a different router.</Alert>
       ) : visibleSections.length === 0 ? (
         <Alert tone="info" title="No matching ports">No port matches “{q}”.</Alert>
       ) : (
-        visibleSections.map((sec) => (
+        visibleSections.map((sec) => sec.offline ? (
           <Panel
-            key={sec.name}
+            key={`off-${sec.id}`}
+            title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><MarkerPin01 width={16} height={16} />{sec.name}</span>}
+            right={
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: NS.bad,
+                background: NS.badBg, borderRadius: 999, padding: "2px 10px",
+              }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: NS.bad }} />
+                Offline
+              </span>
+            }
+          >
+            <div style={{ padding: "14px 16px", fontSize: 13, color: NS.text, lineHeight: 1.5 }}>
+              Router can't be reached right now — other sites keep updating. Retrying every 5 seconds.
+              <div style={{ marginTop: 4, fontSize: 11.5, color: NS.label, overflowWrap: "anywhere" }}>{sec.error}</div>
+            </div>
+          </Panel>
+        ) : (
+          <Panel
+            key={`on-${sec.id ?? sec.name}`}
             title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><MarkerPin01 width={16} height={16} />{sec.name}</span>}
             right={`${sec.ports.length} ports`}
           >

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import dayjs from "dayjs";
 import {
-  Send01, Plus, SearchMd, Trash01, ArrowLeft, Stars02, RefreshCw01, XClose,
+  Send01, Plus, SearchMd, Trash01, ArrowLeft, Stars02, RefreshCw01, XClose, Copy01, Check,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
 import { NS, useIsMobile } from "../components/ns";
@@ -20,7 +20,7 @@ const WA = {
   head: "linear-gradient(90deg, #14284d 0%, #1d3a6e 50%, #26508f 100%)",
   panel: NS.band,
   wall: "#eef2f7",
-  mine: NS.infoBg,
+  mine: "linear-gradient(135deg, #2f67c2 0%, #2a5db0 60%, #24519c 100%)",
   theirs: "#ffffff",
   text: NS.text,
   sub: NS.label,
@@ -137,11 +137,11 @@ function Avatar({ size = 40, user = false }) {
   );
 }
 
-function IconBtn({ title, onClick, children, disabled }) {
+function IconBtn({ title, onClick, children, disabled, size = 32 }) {
   return (
     <button type="button" className="wa-icon-btn" title={title} aria-label={title} onClick={onClick} disabled={disabled}
       style={{
-        width: 32, height: 32, borderRadius: 3, border: "none", background: "transparent",
+        width: size, height: size, borderRadius: "50%", border: "none", background: "transparent",
         color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
         cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, flexShrink: 0,
       }}>
@@ -150,40 +150,76 @@ function IconBtn({ title, onClick, children, disabled }) {
   );
 }
 
-function Bubble({ m, onRetry, answered }) {
+/* Sudut gelembung: pesan pertama dalam satu rentetan punya "ekor" (sudut lancip
+   di sisi pengirim), pesan lanjutan bulat penuh. */
+const bubbleRadius = (mine, first) => (
+  !first ? 16 : mine ? "16px 4px 16px 16px" : "4px 16px 16px 16px"
+);
+
+function Bubble({ m, onRetry, answered, first, mobile }) {
   const mine = m.role === "user";
+  const [copied, setCopied] = useState(false);
+  const canCopy = !mine && !m.error && navigator.clipboard;
+  const copy = () => {
+    navigator.clipboard.writeText(m.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  };
+  const meta = mine ? "rgba(255,255,255,0.78)" : WA.sub;
   return (
-    <div style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", padding: "1px 0" }}>
+    <div className="wa-row" style={{
+      display: "flex", justifyContent: mine ? "flex-end" : "flex-start", alignItems: "flex-end",
+      marginTop: first ? 8 : 2, animation: "wa-in .18s ease-out",
+    }}>
       <div style={{
-        position: "relative", maxWidth: "min(82%, 640px)", padding: "6px 9px 7px",
-        borderRadius: 4, border: `1px solid ${m.error ? "#f3c5c5" : mine ? "#b9cdee" : WA.border}`,
-        background: m.error ? "#ffe9e9" : mine ? WA.mine : WA.theirs,
-        color: WA.text,
-        fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word",
+        position: "relative", maxWidth: mobile ? "86%" : "min(80%, 640px)", padding: "8px 12px 6px",
+        borderRadius: bubbleRadius(mine, first),
+        background: m.error ? "#fff1f0" : mine ? WA.mine : WA.theirs,
+        border: m.error ? "1px solid #f3c5c5" : "none",
+        boxShadow: mine ? "0 1px 2px rgba(20,40,77,0.25)" : "0 1px 2px rgba(20,40,77,0.12)",
+        color: m.error ? "#b42318" : mine ? "#fff" : WA.text,
+        fontSize: mobile ? 14.5 : 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
       }}>
         <FormattedText text={m.content} />
         {m.error && onRetry && (
           <div>
             <button type="button" onClick={onRetry} style={{
-              marginTop: 6, border: "none", background: "transparent", color: WA.teal, fontWeight: 700,
-              cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
+              marginTop: 8, border: "1px solid #f3c5c5", background: "#fff", color: "#b42318", fontWeight: 700,
+              cursor: "pointer", padding: "4px 10px", borderRadius: 999, display: "inline-flex", alignItems: "center",
+              gap: 5, fontSize: 12.5, fontFamily: NS.font,
             }}>
               <RefreshCw01 width={13} height={13} /> Coba lagi
             </button>
           </div>
         )}
         {m.tools?.length > 0 && (
-          <div style={{ marginTop: 4, fontSize: 11, color: WA.sub, whiteSpace: "normal" }}>
-            Data: {[...new Set(m.tools.map(toolLabel))].join(", ")}
+          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4, whiteSpace: "normal" }}>
+            {[...new Set(m.tools.map(toolLabel))].map((t) => (
+              <span key={t} style={{
+                fontSize: 10.5, fontWeight: 600, color: NS.link, background: "#eef3fb",
+                border: "1px solid #d6e2f5", borderRadius: 999, padding: "1px 8px",
+              }}>{t}</span>
+            ))}
           </div>
         )}
-        <span style={{
-          float: "right", marginLeft: 10, marginTop: 4, marginBottom: -4, fontSize: 11, color: WA.sub,
-          display: "inline-flex", alignItems: "center", gap: 3, lineHeight: "15px",
+        <div style={{
+          display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 3,
+          fontSize: 10.5, color: meta, lineHeight: "14px", whiteSpace: "nowrap",
         }}>
+          {canCopy && (
+            <button type="button" className="wa-copy" onClick={copy} title="Salin jawaban" aria-label="Salin jawaban"
+              style={{
+                border: "none", background: "transparent", color: copied ? WA.green : WA.sub, cursor: "pointer",
+                padding: 0, marginRight: "auto", display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10.5,
+                fontFamily: NS.font,
+              }}>
+              {copied ? <><Check width={12} height={12} /> Tersalin</> : <><Copy01 width={12} height={12} /> Salin</>}
+            </button>
+          )}
           {dayjs(m.time).format("HH:mm")}
-          {mine && <DoubleTick color={answered ? WA.tick : WA.sub} />}
-        </span>
+          {mine && <DoubleTick color={answered ? "#9fd3ff" : meta} />}
+        </div>
       </div>
     </div>
   );
@@ -191,13 +227,14 @@ function Bubble({ m, onRetry, answered }) {
 
 function TypingBubble() {
   return (
-    <div style={{ display: "flex", padding: "1px 0" }}>
+    <div style={{ display: "flex", marginTop: 8, animation: "wa-in .18s ease-out" }}>
       <div style={{
-        background: WA.theirs, borderRadius: 4, border: `1px solid ${WA.border}`, padding: "9px 12px", display: "flex", gap: 4,
+        background: WA.theirs, borderRadius: bubbleRadius(false, true), boxShadow: "0 1px 2px rgba(20,40,77,0.12)",
+        padding: "12px 14px", display: "flex", gap: 4,
       }}>
         {[0, 1, 2].map((i) => (
           <span key={i} style={{
-            width: 7, height: 7, borderRadius: "50%", background: "#8696a0",
+            width: 7, height: 7, borderRadius: "50%", background: "#8fa3bf",
             animation: `wa-typing 1.2s ${i * 0.18}s infinite ease-in-out`,
           }} />
         ))}
@@ -211,6 +248,9 @@ function TypingBubble() {
    (widget memakai ini untuk tanda pesan belum dibaca). */
 export default function NetworkChat({ compact = false, onClose, onAnswer }) {
   const isMobile = useIsMobile(820) || compact;
+  // Layar HP sungguhan (bukan sekadar widget sempit): target sentuh & huruf lebih besar.
+  const phone = useIsMobile(560);
+  const btnSize = phone ? 40 : 32;
   const [store, setStore] = useState(loadChats);
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
@@ -327,18 +367,21 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
       width: isMobile ? "100%" : 340, flexShrink: 0, display: "flex", flexDirection: "column",
       background: "#fff", borderRight: `1px solid ${WA.border}`, minHeight: 0,
     }}>
-      <div style={{ height: 48, padding: "0 8px 0 14px", background: WA.head, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Tanya Jaringan</div>
+      <div style={{
+        minHeight: phone ? 56 : 52, padding: "0 8px 0 16px", paddingTop: compact ? "env(safe-area-inset-top)" : 0,
+        background: WA.head, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0,
+      }}>
+        <div style={{ fontSize: phone ? 16 : 14.5, fontWeight: 700, color: "#fff" }}>Tanya Jaringan</div>
         <div style={{ display: "flex" }}>
-          <IconBtn title="Percakapan baru" onClick={startNewChat}><Plus width={18} height={18} /></IconBtn>
-          {onClose && <IconBtn title="Tutup" onClick={onClose}><XClose width={18} height={18} /></IconBtn>}
+          <IconBtn size={btnSize} title="Percakapan baru" onClick={startNewChat}><Plus width={19} height={19} /></IconBtn>
+          {onClose && <IconBtn size={btnSize} title="Tutup" onClick={onClose}><XClose width={19} height={19} /></IconBtn>}
         </div>
       </div>
-      <div style={{ padding: "7px 12px", borderBottom: `1px solid ${WA.border}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", border: `1px solid ${NS.field}`, borderRadius: 3, padding: "0 10px", height: 30 }}>
+      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${WA.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f1f4f8", borderRadius: 999, padding: "0 14px", height: phone ? 40 : 34 }}>
           <SearchMd width={15} height={15} color={WA.sub} />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari percakapan"
-            style={{ border: "none", outline: "none", background: "transparent", flex: 1, fontSize: 13.5, color: WA.text, fontFamily: NS.font }} />
+            style={{ border: "none", outline: "none", background: "transparent", flex: 1, minWidth: 0, fontSize: phone ? 16 : 13.5, color: WA.text, fontFamily: NS.font }} />
         </div>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -348,8 +391,8 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
           return (
             <div key={c.id} onClick={() => openChat(c.id)} className="wa-chat-row"
               style={{ display: "flex", gap: 12, alignItems: "center", padding: "0 12px 0 14px", cursor: "pointer", background: isActive ? WA.active : "transparent" }}>
-              <Avatar size={34} />
-              <div style={{ flex: 1, minWidth: 0, padding: "9px 0", borderBottom: `1px solid ${WA.border}` }}>
+              <Avatar size={phone ? 42 : 36} />
+              <div style={{ flex: 1, minWidth: 0, padding: phone ? "12px 0" : "10px 0", borderBottom: `1px solid ${WA.border}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: WA.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {c.title || "Percakapan baru"}
@@ -364,7 +407,7 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
                   </span>
                   <button type="button" className="wa-del" title="Hapus percakapan" aria-label="Hapus percakapan"
                     onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }}
-                    style={{ border: "none", background: "transparent", color: WA.sub, cursor: "pointer", padding: 2, display: "flex" }}>
+                    style={{ border: "none", background: "transparent", color: WA.sub, cursor: "pointer", padding: phone ? 6 : 2, margin: phone ? -4 : 0, display: "flex" }}>
                     <Trash01 width={15} height={15} />
                   </button>
                 </div>
@@ -381,42 +424,64 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
   let lastDay = null;
   const chatPanel = active && (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ height: 48, padding: isMobile ? "0 6px 0 4px" : "0 16px", background: WA.head, display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, borderLeft: isMobile ? "none" : `1px solid ${WA.border}` }}>
-        {isMobile && <IconBtn title="Semua percakapan" onClick={() => setShowList(true)}><ArrowLeft width={18} height={18} /></IconBtn>}
-        <Avatar size={30} />
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13.5, color: "#fff", fontWeight: 700 }}>Hermes NOC</div>
-          <div style={{ fontSize: 11, color: loading ? "#9fe0a8" : "rgba(255,255,255,0.75)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <div style={{
+        minHeight: phone ? 56 : 52, padding: isMobile ? "0 6px 0 4px" : "0 16px", paddingTop: compact ? "env(safe-area-inset-top)" : 0,
+        background: WA.head, display: "flex", alignItems: "center", gap: isMobile ? 6 : 12, flexShrink: 0,
+        borderLeft: isMobile ? "none" : `1px solid ${WA.border}`, boxShadow: "0 1px 4px rgba(20,40,77,0.25)", zIndex: 1,
+      }}>
+        {isMobile && <IconBtn size={btnSize} title="Semua percakapan" onClick={() => setShowList(true)}><ArrowLeft width={19} height={19} /></IconBtn>}
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <Avatar size={phone ? 36 : 32} />
+          {info?.enabled && (
+            <span style={{
+              position: "absolute", right: -1, bottom: -1, width: 10, height: 10, borderRadius: "50%",
+              background: "#3ccf6e", border: "2px solid #1d3a6e",
+            }} />
+          )}
+        </div>
+        <div style={{ minWidth: 0, flex: 1, marginLeft: 4 }}>
+          <div style={{ fontSize: phone ? 15 : 14, color: "#fff", fontWeight: 700, lineHeight: 1.25 }}>Hermes NOC</div>
+          <div style={{ fontSize: 11.5, color: loading ? "#9fe0a8" : "rgba(255,255,255,0.75)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {loading ? "sedang mengetik…" : disabled ? (info.offline ? "backend tidak terhubung" : "belum aktif") : info ? (compact ? "online" : "online · membaca seluruh data jaringan") : "menghubungkan…"}
           </div>
         </div>
-        <IconBtn title="Percakapan baru" onClick={startNewChat}><Plus width={18} height={18} /></IconBtn>
-        {onClose && <IconBtn title="Tutup" onClick={onClose}><XClose width={18} height={18} /></IconBtn>}
+        <IconBtn size={btnSize} title="Percakapan baru" onClick={startNewChat}><Plus width={19} height={19} /></IconBtn>
+        {onClose && <IconBtn size={btnSize} title="Tutup" onClick={onClose}><XClose width={19} height={19} /></IconBtn>}
       </div>
 
-      <div style={{
-        flex: 1, overflowY: "auto", padding: isMobile ? "10px" : "16px 7%", background: WA.wall,
-        display: "flex", flexDirection: "column", gap: 6,
+      <div className="wa-wall" style={{
+        flex: 1, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch",
+        padding: isMobile ? "10px 12px 14px" : "16px 7%",
+        display: "flex", flexDirection: "column",
       }}>
-        <div style={{ alignSelf: "center", maxWidth: 520, margin: "4px 0 10px", padding: "6px 10px", background: NS.warnBg, border: "1px solid #ecd9a0", borderRadius: 3, fontSize: 11.5, color: NS.warn, textAlign: "center" }}>
-          Asisten AI ini membaca data jaringan langsung (Zabbix, MikroTik, Netwatch) dan hanya membaca, tidak bisa mengubah konfigurasi.
+        <div style={{
+          alignSelf: "center", maxWidth: 520, margin: "4px 8px 6px", padding: "7px 12px", background: "#fffaeb",
+          border: "1px solid #f3e2a9", borderRadius: 10, fontSize: 11.5, lineHeight: 1.45, color: NS.warn, textAlign: "center",
+        }}>
+          🔒 Asisten AI ini membaca data jaringan langsung (Zabbix, MikroTik, Netwatch) dan hanya membaca, tidak bisa mengubah konfigurasi.
         </div>
 
         {disabled && (
-          <div style={{ alignSelf: "center", padding: "8px 14px", background: "#ffe9e9", borderRadius: 3, fontSize: 12.5, color: "#b42318" }}>
+          <div style={{ alignSelf: "center", margin: "8px 0", padding: "8px 14px", background: "#fff1f0", border: "1px solid #f3c5c5", borderRadius: 10, fontSize: 12.5, color: "#b42318", textAlign: "center" }}>
             {info.offline ? "Backend tidak bisa dihubungi." : "Chat AI belum aktif: isi HERMES_BASE_URL dan HERMES_MODEL di backend/app/.env lalu restart backend."}
           </div>
         )}
 
         {active.messages.length === 0 && !disabled && (
-          <div style={{ alignSelf: "center", width: "100%", maxWidth: 560, marginTop: 8 }}>
-            <div style={{ textAlign: "center", fontSize: 13, color: WA.sub, marginBottom: 10 }}>Coba tanyakan:</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          <div style={{ alignSelf: "center", width: "100%", maxWidth: 560, marginTop: phone ? 16 : 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Avatar size={phone ? 56 : 48} />
+              <div style={{ fontSize: phone ? 16 : 14.5, fontWeight: 700, color: WA.text }}>Halo! Mau cek apa hari ini?</div>
+              <div style={{ fontSize: 12.5, color: WA.sub, textAlign: "center" }}>Pilih contoh pertanyaan atau ketik sendiri.</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: phone || compact ? "column" : "row", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
               {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" onClick={() => send(s)} disabled={!!loadingId}
+                <button key={s} type="button" className="wa-sugg" onClick={() => send(s)} disabled={!!loadingId}
                   style={{
-                    border: "1px solid #b9cdee", background: "#fff", color: NS.link, borderRadius: 3,
-                    padding: "5px 10px", fontSize: 12, cursor: "pointer", fontFamily: NS.font,
+                    border: "1px solid #d6e2f5", background: "#fff", color: NS.link,
+                    borderRadius: phone || compact ? 12 : 999, textAlign: "left",
+                    padding: phone ? "11px 14px" : "7px 12px", fontSize: phone ? 14 : 12.5, fontWeight: 500,
+                    cursor: "pointer", fontFamily: NS.font, boxShadow: "0 1px 2px rgba(20,40,77,0.06)",
                   }}>
                   {s}
                 </button>
@@ -430,15 +495,20 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
           const sep = day !== lastDay;
           lastDay = day;
           const isLast = i === active.messages.length - 1;
+          const first = sep || i === 0 || active.messages[i - 1].role !== m.role;
           const answered = m.role === "user" && active.messages.slice(i + 1).some((x) => x.role === "assistant" && !x.error);
           return (
             <Fragment key={i}>
               {sep && (
-                <div style={{ alignSelf: "center", margin: "8px 0", padding: "3px 10px", background: NS.band, borderRadius: 3, fontSize: 11, fontWeight: 600, color: NS.bandText }}>
+                <div style={{
+                  position: "sticky", top: 0, zIndex: 1, alignSelf: "center", margin: "10px 0 2px", padding: "4px 12px",
+                  background: "rgba(255,255,255,0.92)", borderRadius: 999, fontSize: 11, fontWeight: 600, color: NS.bandText,
+                  boxShadow: "0 1px 2px rgba(20,40,77,0.12)",
+                }}>
                   {day}
                 </div>
               )}
-              <Bubble m={m} answered={answered} onRetry={m.error && isLast && !loadingId ? retry : null} />
+              <Bubble m={m} first={first} mobile={phone} answered={answered} onRetry={m.error && isLast && !loadingId ? retry : null} />
             </Fragment>
           );
         })}
@@ -447,29 +517,43 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); send(); }}
-        style={{ padding: "8px 10px", background: "#fff", borderTop: `1px solid ${WA.border}`, display: "flex", alignItems: "flex-end", gap: 8 }}>
+        style={{
+          padding: phone ? "8px 8px" : "8px 10px",
+          paddingBottom: compact ? "calc(8px + env(safe-area-inset-bottom))" : 8,
+          background: "#f6f8fb", borderTop: `1px solid ${WA.border}`, display: "flex", alignItems: "flex-end", gap: 8, flexShrink: 0,
+        }}>
         <textarea
           ref={inputRef}
           rows={1}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          onKeyDown={(e) => {
+            // Di HP, Enter = baris baru (kirim lewat tombol), seperti WhatsApp.
+            if (e.key === "Enter" && !e.shiftKey && !phone) { e.preventDefault(); send(); }
+          }}
           placeholder={disabled ? "Chat belum aktif" : "Ketik pesan"}
           disabled={disabled}
+          enterKeyHint={phone ? "enter" : "send"}
+          className="wa-input"
           style={{
-            flex: 1, resize: "none", border: `1px solid ${NS.field}`, outline: "none", borderRadius: 3, padding: "7px 10px",
-            fontSize: 13, lineHeight: 1.4, maxHeight: 120, fontFamily: NS.font, color: WA.text, background: "#fff",
+            flex: 1, minWidth: 0, resize: "none", border: `1px solid ${WA.border}`, outline: "none", borderRadius: 22,
+            padding: phone ? "10px 16px" : "8px 14px", minHeight: phone ? 44 : 36, boxSizing: "border-box",
+            // 16px di HP supaya iOS tidak auto-zoom saat input difokus.
+            fontSize: phone ? 16 : 13.5, lineHeight: 1.4, maxHeight: 140, fontFamily: NS.font, color: WA.text, background: "#fff",
             fieldSizing: "content",
           }}
         />
         <button type="submit" title="Kirim" aria-label="Kirim" disabled={!input.trim() || !!loadingId || disabled}
+          className="wa-send"
           style={{
-            width: 34, height: 34, borderRadius: 3, border: "none", flexShrink: 0,
-            background: input.trim() && !loadingId && !disabled ? WA.teal : "#b2b2b2", color: "#fff",
+            width: phone ? 44 : 36, height: phone ? 44 : 36, borderRadius: "50%", border: "none", flexShrink: 0,
+            background: input.trim() && !loadingId && !disabled ? WA.teal : "#c3ccd9", color: "#fff",
             display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: input.trim() && !loadingId && !disabled ? "0 2px 6px rgba(42,93,176,0.4)" : "none",
             cursor: input.trim() && !loadingId && !disabled ? "pointer" : "default",
+            transition: "background .15s, transform .1s",
           }}>
-          <Send01 width={16} height={16} />
+          <Send01 width={phone ? 19 : 16} height={phone ? 19 : 16} />
         </button>
       </form>
     </div>
@@ -485,7 +569,21 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
     }}>
       <style>{`
         @keyframes wa-typing { 0%, 60%, 100% { transform: translateY(0); opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
+        @keyframes wa-in { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+        .wa-wall {
+          background-color: ${WA.wall};
+          background-image: radial-gradient(rgba(42,93,176,0.07) 1px, transparent 1px);
+          background-size: 18px 18px;
+        }
         .wa-icon-btn:hover { background: rgba(255,255,255,0.14) !important; }
+        .wa-icon-btn:active { background: rgba(255,255,255,0.22) !important; }
+        .wa-sugg:hover { background: #f3f7fd !important; border-color: #b9cdee !important; }
+        .wa-sugg:active { transform: scale(.98); }
+        .wa-input:focus { border-color: #8fb0e3 !important; box-shadow: 0 0 0 3px rgba(42,93,176,0.12); }
+        .wa-send:active:not(:disabled) { transform: scale(.92); }
+        .wa-row .wa-copy { opacity: 0; transition: opacity .15s; }
+        .wa-row:hover .wa-copy { opacity: 1; }
+        @media (hover: none) { .wa-row .wa-copy { opacity: 1; } }
         .wa-chat-row:hover { background: ${WA.active} !important; }
         .wa-chat-row .wa-del { opacity: 0; }
         .wa-chat-row:hover .wa-del { opacity: 1; }

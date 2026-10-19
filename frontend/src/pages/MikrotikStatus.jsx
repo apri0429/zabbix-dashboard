@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE } from "../api";
-import { RefreshCw01 } from "@untitledui/icons";
-import { NS, PageHeader, Panel, Alert, btn, th, td, zebraRow, useIsMobile } from "../components/ns";
+import { NS, PageHeader, Panel, Alert, th, td, zebraRow, useIsMobile } from "../components/ns";
 
 const T = {
   navy:     "#24385b",
@@ -117,44 +116,40 @@ function RouterItem({ r, i }) {
 export default function MikrotikStatus() {
   const isMobile = useIsMobile();
   const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Pola sama dengan Live Bandwidth & Active Users: loading penuh hanya saat
+  // pertama, sesudahnya polling tiap 5 detik di latar ("updating…").
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [countdown, setCountdown] = useState(30);
+  const busyRef = useRef(false); // jangan tumpuk request kalau yang lama belum selesai
 
-  const REFRESH_INTERVAL = 30;
-
-  const fetchStatus = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const fetchStatus = async (isBackground = false) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    if (isBackground) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/api/mikrotik/status`, { timeout: 30000 });
       setData(res.data.data || []);
       setLastUpdated(new Date());
-      setCountdown(REFRESH_INTERVAL);
+      setError("");
     } catch (err) {
+      // Polling di latar: data terakhir tetap ditampilkan, cukup tampilkan pesan error.
+      if (!isBackground) setData([]);
       setError(err?.response?.data?.detail || err?.message || "Failed to fetch data.");
     } finally {
+      busyRef.current = false;
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  useEffect(() => {
+    fetchStatus(false);
+    const id = setInterval(() => fetchStatus(true), 5000);
+    return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          fetchStatus();
-          return REFRESH_INTERVAL;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
 
   const onlineCount  = data.filter(r => r.online).length;
   const offlineCount = data.filter(r => !r.online).length;
@@ -163,32 +158,35 @@ export default function MikrotikStatus() {
     ? Math.round(onlineRouters.reduce((sum, r) => sum + (Number(r.cpu_load) || 0), 0) / onlineRouters.length)
     : 0;
 
-  const timeText = lastUpdated
-    ? lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    : "—";
+  const timeText = lastUpdated ? lastUpdated.toLocaleTimeString("en-GB") : "—";
+  const offlineRouters = data.filter((r) => !r.online);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", fontFamily: NS.font, color: NS.text }}>
       <PageHeader
         title="MikroTik"
-        subtitle={`${data.length ? `${onlineCount}/${data.length} routers online${offlineCount ? ` · ${offlineCount} offline` : ""} · avg CPU ${avgCpu}% · ` : ""}${loading ? "updating…" : `updated ${timeText}`}`}
-        actions={
-          <button type="button" onClick={fetchStatus} disabled={loading} style={{ ...btn(false, loading), gap: 8, width: isMobile ? "100%" : "auto" }} title="Refresh now">
-            <RefreshCw01 width={14} height={14} />
-            {loading ? "Refreshing…" : `Refresh · auto in ${countdown}s`}
-          </button>
-        }
+        subtitle={`${data.length ? `${onlineCount}/${data.length} routers online · avg CPU ${avgCpu}% · ` : ""}updated ${timeText}${offlineCount ? ` · ${offlineCount} router offline` : ""}`}
       />
 
-      {error && <Alert tone="bad" title="Unable to load data">{error}</Alert>}
-
-      {!loading && !error && data.length === 0 && (
-        <Alert tone="info" title="No routers configured">
-          Add the MIKROTIK_x settings to the .env file.
+      {error && (
+        <Alert tone="bad" title="Failed to load data">
+          {error}{data.length > 0 && " — showing the last data received, retrying every 5 seconds."}
         </Alert>
       )}
 
-      {data.length > 0 && (
+      {offlineRouters.length > 0 && (
+        <Alert tone="warn" title={`${offlineRouters.map((r) => r.router_name).join(", ")} offline`}>
+          Router can't be reached right now — other routers keep updating. Retrying every 5 seconds.
+        </Alert>
+      )}
+
+      {loading ? (
+        <Panel pad={24}><div style={{ textAlign: "center", color: NS.label, fontSize: 13 }}>Loading router status…</div></Panel>
+      ) : !error && data.length === 0 ? (
+        <Alert tone="info" title="No routers configured">
+          Add the MIKROTIK_x settings to the .env file.
+        </Alert>
+      ) : data.length > 0 && (
         <Panel title="Router Overview" right={`${onlineCount}/${data.length} online`}>
           {isMobile ? data.map((r, i) => <RouterItem key={r.router_id} r={r} i={i} />) : (
           <div style={{ overflowX: "auto" }}>

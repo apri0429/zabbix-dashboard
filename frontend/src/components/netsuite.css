@@ -604,28 +604,41 @@ textarea {
   outline-offset: 2px;
 }
 
-/* Tombol kembali ke atas, muncul di semua halaman saat di-scroll. */
+/* Tombol kembali ke atas, muncul di semua halaman saat di-scroll.
+   Ukuran & posisi disamakan dengan tombol chat melayang (ChatWidget: 52px,
+   jarak tepi 24px / 16px di HP), ditumpuk tepat di atasnya dengan jarak 12px. */
 .ns-totop {
   position: fixed;
-  right: 28px;
-  bottom: 80px; /* di atas tombol chat melayang (42px + jarak 10px) */
+  right: calc(24px + env(safe-area-inset-right));
+  bottom: calc(24px + 52px + 12px + env(safe-area-inset-bottom));
   z-index: 150;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 52px;
+  height: 52px;
   padding: 0;
   border: none;
   border-radius: 50%;
-  background: var(--ns-primary);
+  background: linear-gradient(135deg, #3a74d1 0%, #2a5db0 55%, #1d3a6e 100%);
   color: #ffffff;
   cursor: pointer;
-  box-shadow: 0 3px 10px rgba(20, 40, 77, 0.35);
-  transition: background 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 6px 18px rgba(20, 40, 77, 0.38), 0 2px 4px rgba(20, 40, 77, 0.2);
+  transition: transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 559px) {
+  .ns-totop {
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(16px + 52px + 12px + env(safe-area-inset-bottom));
+  }
+}
+
+.ns-totop:active {
+  transform: scale(0.94);
 }
 
 .ns-totop:hover {
-  background: #1d4a92;
-  transform: translateY(-2px);
+  transform: scale(1.07);
 }

@@ -159,7 +159,7 @@ export default function Layout({ children, onMenuChange }) {
           title="Back to top"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         >
-          <ArrowUp size={18} />
+          <ArrowUp width={24} height={24} />
         </button>
       )}
     </div>

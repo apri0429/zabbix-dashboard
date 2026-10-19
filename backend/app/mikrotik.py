@@ -2,6 +2,7 @@ import datetime
 import os
 import re
 import socket
+import time
 from pathlib import Path
 
 import routeros_api
@@ -171,6 +172,20 @@ def get_router_by_id(router_id):
     return None
 
 
+# Router yang baru saja gagal dijangkau (VPN putus / API mati) tidak dicoba lagi
+# selama beberapa detik: koneksi yang ditolak/timeout makan 2-4 detik dan halaman
+# live (polling tiap 5 detik) jadi ikut lambat. Selama jeda, error terakhir
+# langsung dipakai. {(host, port): (berlaku_sampai, pesan_error, tipe_error)}
+OFFLINE_BACKOFF_SECONDS = _parse_int(os.getenv("MIKROTIK_OFFLINE_BACKOFF", "20"), 20)
+_offline_until = {}
+
+
+def _mark_offline(host, port, exc):
+    if OFFLINE_BACKOFF_SECONDS > 0:
+        _offline_until[(host, port)] = (time.monotonic() + OFFLINE_BACKOFF_SECONDS, str(exc), type(exc))
+    return exc
+
+
 def connect_mikrotik(router_config):
     if not router_config:
         raise ValueError("Konfigurasi router tidak ditemukan")
@@ -187,23 +202,28 @@ def connect_mikrotik(router_config):
     if not user:
         raise ValueError(f"Username MikroTik kosong untuk host {host}")
 
+    cached = _offline_until.get((host, port))
+    if cached and cached[0] > time.monotonic():
+        raise cached[2](cached[1])
+
     try:
         with socket.create_connection((host, port), timeout=timeout):
             pass
     except ConnectionRefusedError:
-        raise ConnectionError(
+        raise _mark_offline(host, port, ConnectionError(
             f"Koneksi ke MikroTik ditolak ({host}:{port}). "
             f"Pastikan IP/port benar dan service API MikroTik aktif."
-        )
+        ))
     except socket.timeout:
-        raise TimeoutError(
+        raise _mark_offline(host, port, TimeoutError(
             f"Koneksi ke MikroTik timeout ({host}:{port}). "
             f"Pastikan router bisa dijangkau dari server."
-        )
+        ))
     except OSError as e:
-        raise ConnectionError(
+        raise _mark_offline(host, port, ConnectionError(
             f"Gagal terhubung ke MikroTik {host}:{port} - {e}"
-        )
+        ))
+    _offline_until.pop((host, port), None)
 
     try:
         connection = routeros_api.RouterOsApiPool(
@@ -253,9 +273,53 @@ def get_interfaces(router_id=None):
     return results
 
 
-def get_dhcp_active(router_id=None):
-    routers = get_mikrotik_configs()
+def _dhcp_active_one_router(router, timeout=None):
+    """Lease DHCP 'bound' dari SATU router (lihat get_dhcp_active). Raise kalau gagal."""
+    cfg = dict(router)
+    if timeout is not None:
+        cfg["timeout"] = timeout
     results = []
+    conn = None
+    try:
+        conn = connect_mikrotik(cfg)
+        api = conn.get_api()
+        leases = api.get_resource("/ip/dhcp-server/lease").get()
+
+        for item in leases:
+            status = (item.get("status") or "").lower()
+
+            if status == "bound":
+                results.append({
+                    "router_id": router["id"],
+                    "router_name": router["name"],
+                    "router_host": router["host"],
+                    "router_port": router["port"],
+                    "router_use_ssl": router.get("use_ssl", False),
+                    ".id": item.get(".id"),
+                    "address": item.get("address"),
+                    "mac-address": item.get("mac-address"),
+                    "host-name": item.get("host-name"),
+                    "server": item.get("server"),
+                    "status": item.get("status"),
+                    "comment": item.get("comment"),
+                    "last-seen": item.get("last-seen"),
+                })
+    finally:
+        if conn:
+            conn.disconnect()
+
+    return results
+
+
+def get_dhcp_active(router_id=None, timeout=None, errors=None):
+    """User aktif (lease DHCP 'bound') dari satu / semua router.
+
+    Router dibaca paralel. Kalau `errors` (list) diberikan, router yang gagal
+    (mis. VPN site putus) dicatat di situ sebagai {router_id, router_name, error}
+    dan router lain tetap tampil; tanpa `errors`, kegagalan di-raise seperti dulu.
+    `timeout` (detik) meng-override timeout koneksi per router.
+    """
+    routers = get_mikrotik_configs()
 
     if router_id is not None:
         selected_router = get_router_by_id(router_id)
@@ -263,36 +327,21 @@ def get_dhcp_active(router_id=None):
             raise ValueError(f"Router dengan id {router_id} tidak ditemukan")
         routers = [selected_router]
 
-    for router in routers:
-        conn = None
-        try:
-            conn = connect_mikrotik(router)
-            api = conn.get_api()
-            leases = api.get_resource("/ip/dhcp-server/lease").get()
+    if not routers:
+        return []
 
-            for item in leases:
-                status = (item.get("status") or "").lower()
+    from concurrent.futures import ThreadPoolExecutor
 
-                if status == "bound":
-                    results.append({
-                        "router_id": router["id"],
-                        "router_name": router["name"],
-                        "router_host": router["host"],
-                        "router_port": router["port"],
-                        "router_use_ssl": router.get("use_ssl", False),
-                        ".id": item.get(".id"),
-                        "address": item.get("address"),
-                        "mac-address": item.get("mac-address"),
-                        "host-name": item.get("host-name"),
-                        "server": item.get("server"),
-                        "status": item.get("status"),
-                        "comment": item.get("comment"),
-                        "last-seen": item.get("last-seen"),
-                    })
-        finally:
-            if conn:
-                conn.disconnect()
-
+    results = []
+    with ThreadPoolExecutor(max_workers=len(routers)) as pool:
+        futures = [(r, pool.submit(_dhcp_active_one_router, r, timeout)) for r in routers]
+        for router, fut in futures:  # urutan router tetap (router 1 dulu, dst)
+            try:
+                results.extend(fut.result())
+            except Exception as e:
+                if errors is None:
+                    raise
+                errors.append({"router_id": router["id"], "router_name": router["name"], "error": str(e)})
     return results
 
 
@@ -350,7 +399,82 @@ def get_queue_tree(router_id=None):
     return results
 
 
-def get_ether_traffic(router_id=None):
+def _ether_traffic_one_router(router, timeout=None):
+    """Baca trafik port ether dari SATU router (lihat get_ether_traffic). Raise kalau gagal."""
+    cfg = dict(router)
+    if timeout is not None:
+        cfg["timeout"] = timeout
+    results = []
+    conn = None
+    try:
+        conn = connect_mikrotik(cfg)
+        api = conn.get_api()
+        iface_res = api.get_resource("/interface")
+        ifaces = iface_res.get()
+        # Cuma port yang lagi running (kabel kepasang/link up) yang ditampilkan —
+        # port ether yang gak dipakai (gak running / disabled) cuma bikin
+        # daftar keriuhan tanpa trafik apa-apa.
+        ethers = [
+            it for it in ifaces
+            if (it.get("type") or "").lower() == "ether" and it.get("name")
+            and _parse_bool(it.get("running"), False)
+            and not _parse_bool(it.get("disabled"), False)
+        ]
+        if not ethers:
+            return results
+        names = [it["name"] for it in ethers]
+
+        traffic_by_name = {}
+        try:
+            traffic = iface_res.call("monitor-traffic", {"interface": ",".join(names), "once": ""})
+            traffic_by_name = {t.get("name"): t for t in traffic}
+        except Exception:
+            pass  # rate kosong tetap ditampilkan (mis. "-") daripada gagal semua
+
+        # Kecepatan link fisik (mis. "1Gbps") dipakai sebagai max-limit buat
+        # hitung persen pemakaian di UI. Nggak fatal kalau gagal/tak didukung.
+        speed_by_name = {}
+        try:
+            eth_mon = api.get_resource("/interface/ethernet").call(
+                "monitor", {"numbers": ",".join(names), "once": ""}
+            )
+            for m in eth_mon:
+                speed_by_name[m.get("name")] = _link_speed_to_bps(m.get("rate"))
+        except Exception:
+            pass
+
+        for it in ethers:
+            name = it["name"]
+            t = traffic_by_name.get(name) or {}
+            max_bps = speed_by_name.get(name)
+            base = {
+                "router_id": router["id"],
+                "router_name": router["name"],
+                "router_host": router["host"],
+                "router_port": router["port"],
+                "router_use_ssl": router.get("use_ssl", False),
+                "priority": None,
+                "limit-at": None,
+                "max-limit": max_bps,
+                "comment": it.get("comment"),
+            }
+            iface_id = it.get("id") or it.get(".id") or name
+            results.append({
+                **base, ".id": f"{iface_id}-rx", "name": f"{name}-download",
+                "rate": t.get("rx-bits-per-second"), "bytes": _to_int(it.get("rx-byte")),
+            })
+            results.append({
+                **base, ".id": f"{iface_id}-tx", "name": f"{name}-upload",
+                "rate": t.get("tx-bits-per-second"), "bytes": _to_int(it.get("tx-byte")),
+            })
+    finally:
+        if conn:
+            conn.disconnect()
+
+    return results
+
+
+def get_ether_traffic(router_id=None, timeout=None, errors=None):
     """Bandwidth live per port Ethernet fisik (RX/TX), ambil langsung dari port
     lewat /interface/monitor-traffic (snapshot sekali, once="" biar gak nge-stream
     kayak default RouterOS). Beda dari get_queue_tree yang bacanya dari Queue Tree
@@ -360,9 +484,13 @@ def get_ether_traffic(router_id=None):
     Tiap port dipecah jadi 2 baris (download = RX, upload = TX) dengan suffix
     "-download"/"-upload" di name-nya, biar format hasilnya sama persis dengan
     get_queue_tree dan bisa dipakai ulang oleh frontend yang sama (LiveBandwidth).
+
+    Router dibaca paralel. Kalau `errors` (list) diberikan, router yang gagal
+    (mis. VPN site putus) dicatat di situ sebagai {router_id, router_name, error}
+    dan router lain tetap tampil; tanpa `errors`, kegagalan di-raise seperti dulu.
+    `timeout` (detik) meng-override timeout koneksi per router.
     """
     routers = get_mikrotik_configs()
-    results = []
 
     if router_id is not None:
         selected_router = get_router_by_id(router_id)
@@ -370,73 +498,21 @@ def get_ether_traffic(router_id=None):
             raise ValueError(f"Router dengan id {router_id} tidak ditemukan")
         routers = [selected_router]
 
-    for router in routers:
-        conn = None
-        try:
-            conn = connect_mikrotik(router)
-            api = conn.get_api()
-            iface_res = api.get_resource("/interface")
-            ifaces = iface_res.get()
-            # Cuma port yang lagi running (kabel kepasang/link up) yang ditampilkan —
-            # port ether yang gak dipakai (gak running / disabled) cuma bikin
-            # daftar keriuhan tanpa trafik apa-apa.
-            ethers = [
-                it for it in ifaces
-                if (it.get("type") or "").lower() == "ether" and it.get("name")
-                and _parse_bool(it.get("running"), False)
-                and not _parse_bool(it.get("disabled"), False)
-            ]
-            if not ethers:
-                continue
-            names = [it["name"] for it in ethers]
+    if not routers:
+        return []
 
-            traffic_by_name = {}
+    from concurrent.futures import ThreadPoolExecutor
+
+    results = []
+    with ThreadPoolExecutor(max_workers=len(routers)) as pool:
+        futures = [(r, pool.submit(_ether_traffic_one_router, r, timeout)) for r in routers]
+        for router, fut in futures:  # urutan router tetap (router 1 dulu, dst)
             try:
-                traffic = iface_res.call("monitor-traffic", {"interface": ",".join(names), "once": ""})
-                traffic_by_name = {t.get("name"): t for t in traffic}
-            except Exception:
-                pass  # rate kosong tetap ditampilkan (mis. "-") daripada gagal semua
-
-            # Kecepatan link fisik (mis. "1Gbps") dipakai sebagai max-limit buat
-            # hitung persen pemakaian di UI. Nggak fatal kalau gagal/tak didukung.
-            speed_by_name = {}
-            try:
-                eth_mon = api.get_resource("/interface/ethernet").call(
-                    "monitor", {"numbers": ",".join(names), "once": ""}
-                )
-                for m in eth_mon:
-                    speed_by_name[m.get("name")] = _link_speed_to_bps(m.get("rate"))
-            except Exception:
-                pass
-
-            for it in ethers:
-                name = it["name"]
-                t = traffic_by_name.get(name) or {}
-                max_bps = speed_by_name.get(name)
-                base = {
-                    "router_id": router["id"],
-                    "router_name": router["name"],
-                    "router_host": router["host"],
-                    "router_port": router["port"],
-                    "router_use_ssl": router.get("use_ssl", False),
-                    "priority": None,
-                    "limit-at": None,
-                    "max-limit": max_bps,
-                    "comment": it.get("comment"),
-                }
-                iface_id = it.get("id") or it.get(".id") or name
-                results.append({
-                    **base, ".id": f"{iface_id}-rx", "name": f"{name}-download",
-                    "rate": t.get("rx-bits-per-second"), "bytes": _to_int(it.get("rx-byte")),
-                })
-                results.append({
-                    **base, ".id": f"{iface_id}-tx", "name": f"{name}-upload",
-                    "rate": t.get("tx-bits-per-second"), "bytes": _to_int(it.get("tx-byte")),
-                })
-        finally:
-            if conn:
-                conn.disconnect()
-
+                results.extend(fut.result())
+            except Exception as e:
+                if errors is None:
+                    raise
+                errors.append({"router_id": router["id"], "router_name": router["name"], "error": str(e)})
     return results
 
 
@@ -594,6 +670,62 @@ def _client_count_one_router(router, timeout=None):
                 pass
 
 
+def _parse_ros_uptime(raw):
+    """Uptime RouterOS ("1w2d03:04:05" / "1w2d3h4m5s") -> detik. None kalau gagal."""
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    total = 0
+    for num, unit in re.findall(r"(\d+)([wdhms])", raw):
+        total += int(num) * {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
+    hms = re.search(r"(\d+):(\d{2}):(\d{2})$", raw)
+    if hms:
+        total += int(hms.group(1)) * 3600 + int(hms.group(2)) * 60 + int(hms.group(3))
+    return total if (total or hms) else None
+
+
+def get_router_postmortem(router_name, timeout=None):
+    """Dipanggil sesudah router yang tadinya tak terjangkau tersambung lagi, untuk
+    memastikan penyebab gangguan dari router itu sendiri:
+    uptime router (restart = listrik mati) dan status/jam Netwatch ISP-nya
+    (entri ke IP publik, mis. 8.8.8.8 / 1.1.1.1). None kalau router tak terbaca."""
+    import ipaddress
+    router = next((r for r in get_mikrotik_configs() if r["name"] == router_name), None)
+    if not router:
+        return None
+    cfg = dict(router)
+    if timeout is not None:
+        cfg["timeout"] = timeout
+    conn = None
+    try:
+        conn = connect_mikrotik(cfg)
+        api = conn.get_api()
+        res = (api.get_resource("/system/resource").get() or [{}])[0]
+        isp = []
+        for it in api.get_resource("/tool/netwatch").get():
+            host = (it.get("host") or "").strip()
+            try:
+                if ipaddress.ip_address(host).is_private:
+                    continue
+            except ValueError:
+                continue
+            isp.append({
+                "name": (it.get("comment") or it.get("name") or host).strip(),
+                "host": host,
+                "status": (it.get("status") or "").lower(),
+                "since": _parse_ros_since(it.get("since")),
+            })
+        return {"uptime_seconds": _parse_ros_uptime(res.get("uptime")), "isp": isp}
+    except Exception:
+        return None
+    finally:
+        if conn:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+
+
 def get_client_counts(timeout=None):
     """{router_name: jumlah_klien} dari lease DHCP semua router (paralel, tahan
     site yang VPN-nya mati). Nilai None = router gagal dibaca."""
@@ -611,57 +743,69 @@ def get_client_counts(timeout=None):
     return out
 
 
-def get_router_status():
+def _router_status_one(router, timeout=None):
+    """CPU / memori / uptime SATU router. Tidak pernah raise: router yang gagal
+    dikembalikan sebagai online=False + error."""
+    cfg = dict(router)
+    if timeout is not None:
+        cfg["timeout"] = timeout
+    conn = None
+    try:
+        conn = connect_mikrotik(cfg)
+        api = conn.get_api()
+        resources = api.get_resource("/system/resource").get()
+        res = resources[0] if resources else {}
+
+        total_mem = int(res.get("total-memory", 0))
+        free_mem = int(res.get("free-memory", 0))
+        used_mem = total_mem - free_mem
+
+        return {
+            "router_id": router["id"],
+            "router_name": router["name"],
+            "router_host": router["host"],
+            "online": True,
+            "cpu_load": int(res.get("cpu-load", 0)),
+            "uptime": res.get("uptime", ""),
+            "free_memory": free_mem,
+            "total_memory": total_mem,
+            "used_memory": used_mem,
+            "board_name": res.get("board-name", ""),
+            "version": res.get("version", ""),
+            "architecture": res.get("architecture-name", ""),
+        }
+    except Exception as e:
+        return {
+            "router_id": router["id"],
+            "router_name": router["name"],
+            "router_host": router["host"],
+            "online": False,
+            "cpu_load": 0,
+            "uptime": "",
+            "free_memory": 0,
+            "total_memory": 0,
+            "used_memory": 0,
+            "board_name": "",
+            "version": "",
+            "architecture": "",
+            "error": str(e),
+        }
+    finally:
+        if conn:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+
+
+def get_router_status(timeout=None):
+    """Status semua router, dibaca paralel supaya satu site yang VPN-nya mati
+    tidak memperlambat yang lain. `timeout` (detik) meng-override timeout koneksi."""
     routers = get_mikrotik_configs()
-    results = []
+    if not routers:
+        return []
 
-    for router in routers:
-        conn = None
-        try:
-            conn = connect_mikrotik(router)
-            api = conn.get_api()
-            resources = api.get_resource("/system/resource").get()
-            res = resources[0] if resources else {}
+    from concurrent.futures import ThreadPoolExecutor
 
-            total_mem = int(res.get("total-memory", 0))
-            free_mem = int(res.get("free-memory", 0))
-            used_mem = total_mem - free_mem
-
-            results.append({
-                "router_id": router["id"],
-                "router_name": router["name"],
-                "router_host": router["host"],
-                "online": True,
-                "cpu_load": int(res.get("cpu-load", 0)),
-                "uptime": res.get("uptime", ""),
-                "free_memory": free_mem,
-                "total_memory": total_mem,
-                "used_memory": used_mem,
-                "board_name": res.get("board-name", ""),
-                "version": res.get("version", ""),
-                "architecture": res.get("architecture-name", ""),
-            })
-        except Exception as e:
-            results.append({
-                "router_id": router["id"],
-                "router_name": router["name"],
-                "router_host": router["host"],
-                "online": False,
-                "cpu_load": 0,
-                "uptime": "",
-                "free_memory": 0,
-                "total_memory": 0,
-                "used_memory": 0,
-                "board_name": "",
-                "version": "",
-                "architecture": "",
-                "error": str(e),
-            })
-        finally:
-            if conn:
-                try:
-                    conn.disconnect()
-                except Exception:
-                    pass
-
-    return results
+    with ThreadPoolExecutor(max_workers=len(routers)) as pool:
+        return list(pool.map(lambda r: _router_status_one(r, timeout), routers))

@@ -438,6 +438,12 @@ const DeviceCard = ({ d, idx = 0, compact = false, pal, showSite = false, trend 
           </span>
         )}
 
+        {d.cause && !compact && (
+          <span style={{ fontSize: 10, color: d.state === "DOWN" ? pal.DOWN : pal.WARN, fontWeight: 700, overflowWrap: "anywhere", lineHeight: 1.3 }}>
+            Penyebab: {d.cause.replace(/\*/g, "")}
+          </span>
+        )}
+
         {d.state !== "DOWN" && trend.filter((v) => v != null).length >= 2 && (
           <span title="Tren latency ±2 jam" style={{ marginTop: 2 }}>
             <Sparkline points={trend} color={c} w={compact ? 76 : 92} h={18} />

@@ -55,15 +55,24 @@ export default function ChatWidget() {
     return () => { document.body.style.overflow = prev; };
   }, [open, isMobile]);
 
+  // HP: layar penuh setinggi viewport dinamis (dvh) supaya tidak tertutup bilah browser/keyboard.
   const panelStyle = isMobile
-    ? { inset: 0, borderRadius: 0 }
-    : { right: 28, bottom: 80, width: 350, height: "min(500px, calc(100vh - 100px))", borderRadius: 6 };
+    ? { top: 0, left: 0, right: 0, height: "100dvh", borderRadius: 0, border: "none" }
+    : {
+      right: 24, bottom: 88, width: 380, height: "min(620px, calc(100vh - 112px))", borderRadius: 16,
+      border: "1px solid rgba(195,204,217,0.7)",
+    };
+
+  const fabSize = 52; // sama dengan tombol kembali ke atas (.ns-totop)
+  const fabEdge = isMobile ? 16 : 24;
 
   return createPortal((
     <>
       <style>{`
         @keyframes cw-pop { from { opacity: 0; transform: translateY(16px) scale(.97) } to { opacity: 1; transform: none } }
-        @keyframes cw-pulse { 0% { box-shadow: 0 0 0 0 rgba(37,211,102,.55) } 70% { box-shadow: 0 0 0 10px rgba(37,211,102,0) } 100% { box-shadow: 0 0 0 0 rgba(37,211,102,0) } }
+        @keyframes cw-slide { from { transform: translateY(100%) } to { transform: none } }
+        @keyframes cw-pulse { 0% { box-shadow: 0 0 0 0 rgba(37,211,102,.55) } 70% { box-shadow: 0 0 0 12px rgba(37,211,102,0) } 100% { box-shadow: 0 0 0 0 rgba(37,211,102,0) } }
+        .cw-fab:active { transform: scale(.94) !important; }
       `}</style>
 
       {mounted && (
@@ -73,8 +82,10 @@ export default function ChatWidget() {
           aria-hidden={!open}
           style={{
             position: "fixed", zIndex: 2500, overflow: "hidden", background: "#fff",
-            border: "1px solid #c3ccd9", boxShadow: "0 10px 30px rgba(20,40,77,0.25)",
-            display: open ? "block" : "none", animation: open ? "cw-pop .18s ease-out" : "none",
+            boxShadow: "0 18px 50px rgba(20,40,77,0.28), 0 2px 8px rgba(20,40,77,0.12)",
+            display: open ? "block" : "none",
+            animation: open ? (isMobile ? "cw-slide .24s cubic-bezier(.2,.8,.2,1)" : "cw-pop .2s ease-out") : "none",
+            transformOrigin: "bottom right",
             ...panelStyle,
           }}
         >
@@ -85,11 +96,16 @@ export default function ChatWidget() {
       )}
 
       {!(open && isMobile) && (
-        <div style={{ position: "fixed", right: 28, bottom: 28, zIndex: 2501, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{
+          position: "fixed", zIndex: 2501, display: "flex", alignItems: "center", gap: 10,
+          right: `calc(${fabEdge}px + env(safe-area-inset-right))`,
+          bottom: `calc(${fabEdge}px + env(safe-area-inset-bottom))`,
+        }}>
           {hover && !open && !isMobile && (
             <div style={{
-              background: "#fff", color: "#333", fontSize: 12, fontWeight: 600, padding: "6px 10px",
-              borderRadius: 3, border: "1px solid #c3ccd9", boxShadow: "0 4px 14px rgba(11,20,26,0.18)", whiteSpace: "nowrap",
+              background: "#fff", color: "#333", fontSize: 12.5, fontWeight: 600, padding: "8px 12px",
+              borderRadius: 999, border: "1px solid #dde3ec", boxShadow: "0 4px 14px rgba(11,20,26,0.15)", whiteSpace: "nowrap",
+              animation: "cw-pop .15s ease-out",
             }}>
               Tanya jaringan ke Hermes
             </div>
@@ -101,19 +117,22 @@ export default function ChatWidget() {
             onClick={() => setOpen((o) => !o)}
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
+            className="cw-fab"
             style={{
-              position: "relative", width: 42, height: 42, borderRadius: "50%", border: "none",
-              background: TEAL, color: "#fff", cursor: "pointer", display: "flex",
+              position: "relative", width: fabSize, height: fabSize, borderRadius: "50%", border: "none",
+              background: "linear-gradient(135deg, #3a74d1 0%, #2a5db0 55%, #1d3a6e 100%)",
+              color: "#fff", cursor: "pointer", display: "flex",
               alignItems: "center", justifyContent: "center",
-              boxShadow: "0 3px 10px rgba(20,40,77,0.35)",
-              transition: "transform .15s ease", transform: hover ? "scale(1.06)" : "none",
+              boxShadow: "0 6px 18px rgba(20,40,77,0.38), 0 2px 4px rgba(20,40,77,0.2)",
+              transition: "transform .15s ease", transform: hover ? "scale(1.07)" : "none",
               animation: unread ? "cw-pulse 1.6s infinite" : "none",
+              WebkitTapHighlightColor: "transparent",
             }}
           >
-            {open ? <XClose width={18} height={18} /> : <RobotIcon size={21} />}
+            {open ? <XClose width={22} height={22} /> : <RobotIcon size={26} />}
             {unread && !open && (
               <span style={{
-                position: "absolute", top: 0, right: 0, width: 12, height: 12, borderRadius: "50%",
+                position: "absolute", top: 1, right: 1, width: 14, height: 14, borderRadius: "50%",
                 background: "#25d366", border: "2px solid #fff",
               }} />
             )}

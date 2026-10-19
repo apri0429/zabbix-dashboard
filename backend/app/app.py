@@ -50,9 +50,9 @@ PNM_HEADER_H   = 210 * 348 / 1820   # full-width A4 -> ~40.1 mm (image is 1820x3
 PNM_FOOTER_H   = 210 * 254 / 1820   # full-width A4 -> ~29.3 mm (image is 1820x254)
 
 try:
-    from .mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik
+    from .mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik, get_router_postmortem
 except ImportError:
-    from mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik
+    from mikrotik import get_dhcp_active, get_queue_tree, get_ether_traffic, get_router_status, get_router_list, get_netwatch, get_client_counts, get_mikrotik_configs, connect_mikrotik, get_router_postmortem
 
 try:
     from . import noc_history
@@ -3316,6 +3316,119 @@ except (TypeError, ValueError):
     NOC_NETWATCH_TIMEOUT = 4
 
 
+def _ping_host(host: Optional[str], count: int = 2, wait_s: int = 1) -> Optional[bool]:
+    """True = ada balasan ping, False = tidak ada, None = ping tidak bisa dijalankan."""
+    if not host:
+        return None
+    import subprocess
+    if os.name == "nt":
+        cmd = ["ping", "-n", str(count), "-w", str(wait_s * 1000), host]
+    else:
+        cmd = ["ping", "-c", str(count), "-W", str(wait_s), host]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=count * wait_s + 5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # Windows tetap exit 0 untuk "Destination host unreachable", jadi cek "ttl=".
+    return r.returncode == 0 and "ttl=" in r.stdout.decode(errors="ignore").lower()
+
+
+def _diagnose_router(row: Dict) -> Dict:
+    """Router yang Netwatch-nya gagal dibaca: tentukan DOWN atau cuma API-nya
+    yang bermasalah, plus penyebab yang paling mungkin.
+
+    - Router bisa di-ping / koneksi API "ditolak" (router membalas) -> router
+      hidup, API-nya saja yang tidak bisa diakses -> UNKNOWN (tidak terpantau).
+    - Router tidak bisa di-ping -> DOWN. Kalau MIKROTIK_<n>_PUBLIC_HOST diisi
+      (IP publik / DDNS router site), dipakai untuk membedakan VPN putus
+      (IP publik masih membalas) dari internet / listrik site mati."""
+    err = (row.get("error") or "").strip()
+    host = row.get("router_host")
+    lan = _ping_host(host)
+    if lan or "ditolak" in err.lower():
+        return {"state": "UNKNOWN",
+                "cause": f"*ROUTER bermasalah (API)* — router hidup tapi API MikroTik tidak bisa diakses "
+                         f"({err[:120] or 'tanpa keterangan'}). Cek service API, port, dan firewall router."}
+
+    public = (os.getenv(f"MIKROTIK_{row.get('router_id')}_PUBLIC_HOST") or "").strip()
+    pub = _ping_host(public) if public else None
+    if pub:
+        cause = f"*VPN putus* — internet site masih hidup (IP publik {public} membalas ping)."
+    elif pub is False:
+        cause = (f"*ISP / listrik site mati* — router ({host}) dan IP publik {public} "
+                 "sama-sama tidak membalas.")
+    else:
+        # Site tanpa IP publik hanya terjangkau lewat VPN, jadi saat ini belum
+        # bisa dibedakan. Penyebab pastinya dicek ke router begitu tersambung
+        # lagi (lihat _router_confirmed_cause) dan dikirim di WA "UP".
+        cause = (f"*VPN putus / ISP site mati / listrik mati* — router ({host}) tidak membalas lewat VPN. "
+                 "Penyebab pastinya dikirim saat router tersambung lagi.")
+    return {"state": "DOWN", "cause": cause}
+
+
+def _router_confirmed_cause(router_name: str, down_since: float, up_at: float) -> Optional[str]:
+    """Sesudah router tersambung lagi: tanya router-nya apa yang sebenarnya terjadi
+    selama [down_since, up_at]."""
+    pm = get_router_postmortem(router_name, timeout=NOC_NETWATCH_TIMEOUT)
+    if not pm:
+        return None
+    fmt = "%Y-%m-%d %H:%M:%S"
+    outage = up_at - down_since
+    up = pm.get("uptime_seconds")
+    if up is not None and up < outage + 300:
+        booted = datetime.datetime.fromtimestamp(time.time() - up).strftime(fmt)
+        return f"*LISTRIK / ROUTER mati* — router site restart, baru menyala lagi jam {booted}."
+    # Entri Netwatch ISP yang berubah status selama gangguan = ISP-nya putus.
+    flapped, still_down = [], []
+    for it in pm.get("isp") or []:
+        t = _ts_epoch(it.get("since"))
+        if it.get("status") == "down":
+            still_down.append(it["name"])
+        elif t and down_since - 120 <= t <= time.time():
+            flapped.append(f"{it['name']} (pulih {it['since'][11:16]})")
+    if flapped or still_down:
+        parts = []
+        if flapped:
+            parts.append("putus lalu pulih: " + ", ".join(flapped))
+        if still_down:
+            parts.append("masih mati: " + ", ".join(still_down))
+        return "*ISP site mati* — " + "; ".join(parts) + "."
+    return "*VPN putus* — router & internet site tetap hidup selama gangguan, hanya VPN-nya yang terputus."
+
+
+def _site_place(name: str) -> str:
+    """'Mikrotik Rawa Bokor - BIZNET' / 'Gudang Rawa Bokor' -> 'rawa bokor', untuk
+    mencocokkan site ISP (Zabbix) dengan router MikroTik-nya."""
+    base = (name or "").split(" - ")[0].lower()
+    return " ".join(w for w in base.split() if w not in ("mikrotik", "gudang", "ho", "router"))
+
+
+def _alert_cause(e: Dict, current: Dict[str, Dict]) -> Optional[str]:
+    """Penyebab untuk alert DOWN: ISP, VPN, router, atau perangkatnya sendiri."""
+    if e.get("cause"):
+        return e["cause"]
+    key = e.get("key") or ""
+    if key.startswith("device:"):
+        router = key.split(":")[1]
+        return (f"*PERANGKAT mati* — tidak membalas ping dari router {router} "
+                "(cek listrik, kabel, atau perangkatnya).")
+    if key.startswith("site:"):
+        label = key[5:]
+        isp = label.split(" - ")[1] if " - " in label else "ISP"
+        if not is_vpn_measured(label):
+            return f"*ISP {isp} mati* — internet lewat jalur {isp} putus."
+        place = _site_place(label)
+        router_up = any(c.get("router") and _site_place(c["name"]) == place and c["state"] == "UP"
+                        for c in current.values())
+        if router_up:
+            return f"*ISP {isp} mati* — router site masih terjangkau, jalur {isp}-nya yang putus."
+        return f"*ISP {isp} mati atau VPN ke site putus* — diukur dari Zabbix lewat VPN."
+    return None
+
+
+_ROUTER_FAIL_SINCE: Dict[str, str] = {}   # router_name -> jam pertama gagal dibaca
+
+
 def _noc_devices() -> List[Dict]:
     """Perangkat (mis. access point) dari /tool/netwatch di router MikroTik."""
     try:
@@ -3325,8 +3438,45 @@ def _noc_devices() -> List[Dict]:
         traceback.print_exc()
         return []
 
+    failed = [r for r in rows if not r.get("host") and r.get("router_name")]
+    if failed:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(4, len(failed))) as pool:
+            diags = list(pool.map(_diagnose_router, failed))
+    else:
+        diags = []
+    diag_by_router = {r["router_name"]: dg for r, dg in zip(failed, diags)}
+    # Jam router pertama kali gagal dibaca = perkiraan jam mati terbaik
+    # (RouterOS-nya sendiri tidak bisa ditanya).
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for name in list(_ROUTER_FAIL_SINCE):
+        if name not in diag_by_router:
+            _ROUTER_FAIL_SINCE.pop(name, None)
+    for name in diag_by_router:
+        _ROUTER_FAIL_SINCE.setdefault(name, now_str)
+
     out = []
     for r in rows:
+        dg = diag_by_router.get(r.get("router_name")) if not r.get("host") else None
+        if dg:
+            # Router-nya sendiri tidak bisa dibaca: jadikan satu entitas "Router X"
+            # dengan penyebabnya, bukan baris "(gagal dibaca)" yang tak pernah alert.
+            out.append({
+                "name": f"Router {r['router_name']}",
+                "host": r.get("router_host"),
+                "comment": None,
+                "dhcp_name": None,
+                "router_name": r.get("router_name"),
+                "status": dg["state"].lower(),
+                "state": dg["state"],
+                "latency_ms": None,
+                "loss_pct": None,
+                "since": _ROUTER_FAIL_SINCE.get(r["router_name"]),
+                "error": r.get("error"),
+                "cause": dg["cause"],
+                "router_failed": True,
+            })
+            continue
         status = (r.get("status") or "unknown").lower()
         state = "UP" if status == "up" else "DOWN" if status == "down" else "UNKNOWN"
         out.append({
@@ -3480,7 +3630,9 @@ def _format_noc_alert(change: Dict) -> str:
         lines.append(f"🔼 Pulih    : {change.get('changed_at') or '-'}")
         lines.append(f"⏳ Durasi   : *{noc_report._fmt_dur(change['duration_seconds'])}*")
     else:
-        lines.append(f"🕐 Waktu   : {change.get('changed_at') or '-'}")
+        lines.append(f"🔻 Mati sejak : {change.get('changed_at') or '-'}")
+    if change.get("cause"):
+        lines.append(f"❓ Penyebab : {change['cause']}")
     lines += [
         "━━━━━━━━━━━━━━",
         "⚠️ _Mohon segera dicek._" if is_down else "👍 _Layanan kembali normal._",
@@ -3553,6 +3705,9 @@ def _send_whatsapp_message(message: str) -> bool:
 # Alert DOWN baru dikirim kalau mati terus >= WA_ALERT_MIN_DOWN_SECONDS (anti-spam
 # untuk putus sesaat). Kalau sudah pulih sebelum itu, tidak ada WA sama sekali.
 WA_ALERT_MIN_DOWN_SECONDS = int(os.getenv("WA_ALERT_MIN_DOWN_SECONDS", "180"))
+# WA "UP" baru dikirim kalau sudah hidup stabil selama ini. Mati lagi sebelum
+# itu = masih gangguan yang sama, jadi tidak ada WA DOWN/UP berulang.
+WA_ALERT_MIN_UP_SECONDS = int(os.getenv("WA_ALERT_MIN_UP_SECONDS", "120"))
 _WA_PENDING_DOWN: Dict[str, Dict] = {}   # key -> {"change", "since", "notified"}
 
 # Pemberitahuan "pemantauan sempat mati" hanya dikirim kalau jedanya cukup lama,
@@ -3591,71 +3746,115 @@ def _ts_epoch(ts: Optional[str]) -> Optional[float]:
 
 
 def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
+    """Satu gangguan = satu WA DOWN + satu WA UP.
+
+    - DOWN dikirim sekali, sesudah mati terus >= WA_ALERT_MIN_DOWN_SECONDS, berisi
+      jam mati asli (dari Netwatch / Zabbix kalau ada) dan penyebabnya.
+    - UP dikirim sekali, sesudah hidup stabil >= WA_ALERT_MIN_UP_SECONDS. Kalau
+      sempat mati lagi sebelum itu, dianggap gangguan yang sama (tidak ada WA
+      DOWN baru), jadi link yang putus-nyambung tidak membanjiri WA."""
     now = time.time()
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     current = {e["key"]: e for e in entities}
 
-    # 1) Transisi ke DOWN. Kalau masih tercatat pending (mis. DOWN -> UNKNOWN ->
-    #    DOWN karena router sempat gagal dibaca), pakai yang lama: waktu mati
-    #    tetap yang asli dan alert-nya tidak terkirim dua kali.
+    def _real_since(e: Dict, fallback: float) -> float:
+        # Jam mati asli dari router/Zabbix; abaikan kalau di masa depan.
+        t = _ts_epoch(e.get("since")) if e.get("state") == "DOWN" else None
+        return t if t and t <= now else fallback
+
+    # 1) Transisi ke DOWN. Kalau masih tercatat (DOWN -> UNKNOWN -> DOWN, atau
+    #    nyala sebentar lalu mati lagi), lanjutkan gangguan yang sama.
     for change in transitions or []:
         key = change.get("key")
-        if key and change.get("new_state") == "DOWN" and key not in _WA_PENDING_DOWN:
-            _WA_PENDING_DOWN[key] = {"change": change, "since": now, "notified": False}
+        if not key or change.get("new_state") != "DOWN":
+            continue
+        entry = _WA_PENDING_DOWN.get(key)
+        if entry:
+            entry.pop("up_since", None)
+            continue
+        since = _real_since(current.get(key) or {}, now)
+        _WA_PENDING_DOWN[key] = {
+            "change": dict(change, changed_at=datetime.datetime.fromtimestamp(since).strftime("%Y-%m-%d %H:%M:%S")),
+            "since": since, "notified": False,
+        }
 
     # 2) Entity DOWN tanpa transisi: perangkat baru yang langsung DOWN saat
     #    pertama tercatat, atau yang DOWN waktu backend restart (memori pending
-    #    hilang). Waktu mati diambil dari event terbukanya di DB.
+    #    hilang). Waktu mati diambil dari router/Zabbix, atau dari event di DB.
     missing = [e for e in entities if e["state"] == "DOWN" and e["key"] not in _WA_PENDING_DOWN]
     if missing:
         open_events = noc_history.get_open_events()
         for e in missing:
             ev = open_events.get(e["key"]) or {}
-            started = _ts_epoch(ev.get("started_at")) or now
+            started = _real_since(e, _ts_epoch(ev.get("started_at")) or now)
             _WA_PENDING_DOWN[e["key"]] = {
                 "change": {"kind": e["kind"], "key": e["key"], "name": e["name"],
                            "old_state": "UP", "new_state": "DOWN",
-                           "changed_at": ev.get("started_at") or now_str},
+                           "changed_at": datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M:%S")},
                 "since": started,
                 # Sudah lama DOWN sebelum backend hidup -> alert-nya sudah terkirim
                 # sebelum restart; jangan dikirim ulang.
-                "notified": now - started >= WA_ALERT_MIN_DOWN_SECONDS + 2 * NOC_HISTORY_POLL_SECONDS,
+                "notified": now - (_ts_epoch(ev.get("started_at")) or now)
+                            >= WA_ALERT_MIN_DOWN_SECONDS + 2 * NOC_HISTORY_POLL_SECONDS,
             }
 
-    # 3) Pulih: dinilai dari status sekarang, bukan dari transisi, supaya
-    #    DOWN -> UNKNOWN -> UP tetap dapat WA "UP". UNKNOWN belum dianggap pulih.
+    # 3) Pulih: dinilai dari status sekarang. UNKNOWN belum dianggap pulih.
     for key, entry in list(_WA_PENDING_DOWN.items()):
         cur = current.get(key)
-        if not cur or cur["state"] in ("DOWN", "UNKNOWN"):
+        if not cur or cur["state"] == "UNKNOWN":
+            continue
+        if cur["state"] == "DOWN":
+            entry.pop("up_since", None)  # mati lagi sebelum stabil -> gangguan yang sama
+            continue
+        if not entry["notified"]:
+            _WA_PENDING_DOWN.pop(key, None)  # putus singkat, DOWN belum dikirim -> abaikan
+            continue
+        entry.setdefault("up_since", now)
+        if now - entry["up_since"] < WA_ALERT_MIN_UP_SECONDS:
             continue
         _WA_PENDING_DOWN.pop(key, None)
-        if not entry["notified"]:
-            continue  # putus singkat, DOWN-nya belum sempat dikirim -> abaikan
+        up_at = entry["up_since"]
+        cause = entry.get("cause")
+        if cur.get("router"):
+            try:
+                cause = _router_confirmed_cause(key.split(":")[1], entry["since"], up_at) or cause
+            except Exception:
+                logging.exception("NOC: cek penyebab gangguan router gagal")
         try:
             _send_whatsapp_message(_format_noc_alert({
                 "kind": cur["kind"], "key": key, "name": cur["name"],
-                "old_state": "DOWN", "new_state": cur["state"], "changed_at": now_str,
+                "old_state": "DOWN", "new_state": cur["state"],
+                "changed_at": datetime.datetime.fromtimestamp(up_at).strftime("%Y-%m-%d %H:%M:%S"),
                 "down_at": entry["change"].get("changed_at"),
-                "duration_seconds": int(now - entry["since"]),
+                "duration_seconds": int(up_at - entry["since"]),
+                "cause": cause,
             }))
         except Exception:
             logging.exception("NOC WA alert pulih gagal dikirim")
 
-    # 4) DOWN yang sudah melewati batas -> kirim. Ditandai terkirim hanya kalau
-    #    WA benar-benar terkirim; kalau gagal dicoba lagi nanti.
+    # 4) DOWN yang sudah melewati batas -> kirim sekali. Ditandai terkirim hanya
+    #    kalau WA benar-benar terkirim; kalau gagal dicoba lagi nanti.
+    down_router_places = {_site_place(c["name"]) for c in current.values()
+                          if c.get("router") and c["state"] == "DOWN"}
     for key, entry in list(_WA_PENDING_DOWN.items()):
         cur = current.get(key)
         if entry["notified"] or not cur or cur["state"] != "DOWN":
             continue
         if now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS or now < entry.get("retry_at", 0):
             continue
+        # Router site-nya sendiri DOWN -> sudah ada satu WA untuk router itu
+        # (beserta penyebabnya); link ISP site itu tidak dikirim terpisah.
+        if key.startswith("site:") and _site_place(key[5:]) in down_router_places:
+            continue
+        cause = _alert_cause(cur, current)
         try:
-            sent = _send_whatsapp_message(_format_noc_alert(entry["change"]))
+            sent = _send_whatsapp_message(_format_noc_alert(dict(entry["change"], cause=cause)))
         except Exception:
             logging.exception("NOC WA alert down gagal dikirim")
             sent = False
         if sent:
             entry["notified"] = True
+            entry["cause"] = cause
         else:
             entry["retry_at"] = now + WA_ALERT_RETRY_SECONDS
 
@@ -3668,17 +3867,22 @@ _WA_HEALTH: Dict[str, Dict] = {}   # key -> {"info", "since", "notified", "retry
 
 def _noc_health_problems(payload: Dict) -> Dict[str, Dict]:
     out: Dict[str, Dict] = {}
+    # Router yang tidak bisa di-ping sudah jadi DOWN (alert biasa). Yang di sini
+    # router hidup tapi API-nya tidak bisa diakses.
     for d in payload.get("devices") or []:
-        if d.get("host") or d.get("state") != "UNKNOWN":
+        if not d.get("router_failed"):
             continue
         rn = d.get("router_name") or "-"
+        if d.get("state") == "DOWN":
+            # Sudah dikirim sebagai alert DOWN router. Tetap dicatat (tanpa kirim)
+            # supaya kejadian "tidak terpantau" yang sedang berjalan tidak dianggap pulih.
+            out[f"router:{rn}"] = {"silent": True}
+            continue
         out[f"router:{rn}"] = {
             "icon": "📡",
             "title": f"Router {rn} tidak bisa dibaca",
             "recovered": f"Router {rn} sudah terbaca lagi",
-            "detail": "Daftar perangkat (Netwatch) di router ini tidak bisa diambil: "
-                      "router mati, VPN putus, atau API router tidak merespons. "
-                      "Selama itu perangkat di site tersebut tidak terpantau.",
+            "detail": f"{d.get('cause') or ''} Selama itu perangkat di site tersebut tidak terpantau.".strip(),
             "lokasi": rn,
         }
     sites = payload.get("sites") or []
@@ -3729,19 +3933,26 @@ def _check_noc_health(payload: Dict):
 
     for key, entry in list(_WA_HEALTH.items()):
         if key in problems:
+            entry.pop("ok_since", None)  # bermasalah lagi sebelum stabil -> kejadian yang sama
+            continue
+        if not entry["notified"]:
+            _WA_HEALTH.pop(key, None)
+            continue
+        entry.setdefault("ok_since", now)
+        if now - entry["ok_since"] < WA_ALERT_MIN_UP_SECONDS:
             continue
         _WA_HEALTH.pop(key, None)
-        if not entry["notified"]:
-            continue
         try:
             _send_whatsapp_message(_format_health_alert(
                 entry["info"], datetime.datetime.fromtimestamp(entry["since"]).strftime(fmt),
-                recovered_at=datetime.datetime.now().strftime(fmt),
-                duration=int(now - entry["since"])))
+                recovered_at=datetime.datetime.fromtimestamp(entry["ok_since"]).strftime(fmt),
+                duration=int(entry["ok_since"] - entry["since"])))
         except Exception:
             logging.exception("NOC WA: kirim pemberitahuan pemantauan pulih gagal")
 
     for key, info in problems.items():
+        if info.get("silent"):
+            continue
         entry = _WA_HEALTH.setdefault(key, {"info": info, "since": now, "notified": False})
         entry["info"] = info
         if entry["notified"] or now - entry["since"] < WA_ALERT_MIN_DOWN_SECONDS \
@@ -3823,7 +4034,7 @@ def _close_vanished_noc_entities(payload: Dict, entities: List[Dict]):
     valid = {e["key"] for e in entities}
     failed_prefixes = tuple(
         f"device:{d.get('router_name') or '-'}:"
-        for d in devices if not d.get("host") and d.get("state") == "UNKNOWN"
+        for d in devices if d.get("router_failed")
     )
     open_keys = noc_history.get_open_entity_keys()
     keep = {k for k in open_keys if k in valid or (failed_prefixes and k.startswith(failed_prefixes))}
@@ -3861,9 +4072,22 @@ def _poll_noc_history():
 
     entities = []
     for s in payload.get("sites", []):
-        entities.append({"kind": "site", "key": f"site:{s['label']}", "name": s["label"], "state": s["state"]})
+        entities.append({"kind": "site", "key": f"site:{s['label']}", "name": s["label"],
+                         "state": s["state"], "since": s.get("since")})
     for d in payload.get("devices", []):
-        entities.append({"kind": "device", "key": _device_key(d), "name": d.get("name") or "-", "state": d["state"]})
+        entities.append({"kind": "device", "key": _device_key(d), "name": d.get("name") or "-",
+                         "state": d["state"], "cause": d.get("cause"), "since": d.get("since"),
+                         "router": bool(d.get("router_failed"))})
+    # Router yang terbaca normal juga dicatat UP, supaya router yang tadinya
+    # DOWN dapat event pulih + WA "UP".
+    if payload.get("devices"):
+        failed_routers = {d.get("router_name") for d in payload["devices"] if d.get("router_failed")}
+        rid = NOC_NETWATCH_ROUTER_ID or None
+        for r in get_mikrotik_configs():
+            if (rid and r["id"] != rid) or r["name"] in failed_routers:
+                continue
+            entities.append({"kind": "device", "key": f"device:{r['name']}:{r['host']}",
+                             "name": f"Router {r['name']}", "state": "UP", "router": True})
 
     try:
         transitions = noc_history.record_snapshot(entities)
@@ -4966,9 +5190,12 @@ def api_debug_items_by_host(host: str, search: str = ""):
 
 @app.get("/api/mikrotik/dhcp-active")
 def api_mikrotik_dhcp_active(router_id: int | None = None):
+    """User aktif (DHCP bound). Router yang offline dicatat di `errors` tanpa
+    menggagalkan router lain; timeout pendek supaya polling 5 detik tetap lancar."""
     try:
-        data = get_dhcp_active(router_id)
-        return {"success": True, "count": len(data), "data": data}
+        errors = []
+        data = get_dhcp_active(router_id, timeout=NOC_NETWATCH_TIMEOUT, errors=errors)
+        return {"success": True, "count": len(data), "data": data, "errors": errors}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -4986,10 +5213,13 @@ def api_mikrotik_queue_tree(router_id: int | None = None):
 
 @app.get("/api/mikrotik/ether-traffic")
 def api_mikrotik_ether_traffic(router_id: int | None = None):
-    """Live bandwidth per port Ethernet fisik (RX/TX) — lihat get_ether_traffic."""
+    """Live bandwidth per port Ethernet fisik (RX/TX) — lihat get_ether_traffic.
+    Router yang offline tidak menggagalkan respons: dicatat di `errors`, router
+    lain tetap tampil. Timeout pendek supaya polling 5 detik tetap lancar."""
     try:
-        data = get_ether_traffic(router_id)
-        return {"success": True, "count": len(data), "data": data}
+        errors = []
+        data = get_ether_traffic(router_id, timeout=NOC_NETWATCH_TIMEOUT, errors=errors)
+        return {"success": True, "count": len(data), "data": data, "errors": errors}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -5007,8 +5237,10 @@ def api_mikrotik_netwatch(router_id: int | None = None):
 
 @app.get("/api/mikrotik/status")
 def api_mikrotik_status():
+    """Status tiap router; router offline tetap muncul (online=False + error).
+    Timeout pendek supaya polling 5 detik tetap lancar."""
     try:
-        data = get_router_status()
+        data = get_router_status(timeout=NOC_NETWATCH_TIMEOUT)
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         traceback.print_exc()

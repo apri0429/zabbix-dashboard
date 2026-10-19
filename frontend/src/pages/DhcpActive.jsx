@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Users01, Wifi, MarkerPin05 } from "@untitledui/icons";
 import { buildApiUrl } from "../api";
 import { NS, PageHeader, Panel, Alert, Field, MItem, MFacts, btn, fieldStyle, th, td, zebraRow } from "../components/ns";
@@ -66,9 +66,14 @@ export default function DhcpActive() {
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdate, setLastUpdate]   = useState("");
   const [isMobile, setIsMobile]       = useState(() => window.innerWidth <= 640);
+  // Router yang gagal dibaca (mis. VPN site putus): [{router_id, router_name, error}].
+  // User dari router lain tetap tampil & terus diperbarui.
+  const [offline, setOffline]         = useState([]);
+  const busyRef = useRef(false);   // jangan tumpuk request kalau yang lama belum selesai
+  const reqSeq  = useRef(0);       // abaikan balasan telat setelah ganti router
 
   const routerOptions = [
-    { value: "all", label: "Semua Router" },
+    { value: "all", label: "All Routers" },
     { value: "1",   label: "HO Duta Garden" },
     { value: "2",   label: "Gudang Jatake" },
     { value: "3",   label: "Gudang Ks Tubun" },
@@ -82,6 +87,9 @@ export default function DhcpActive() {
   }, []);
 
   const fetchDhcpActive = async (isBackground = false) => {
+    if (isBackground && busyRef.current) return;
+    busyRef.current = true;
+    const seq = ++reqSeq.current;
     try {
       if (isBackground) setRefreshing(true);
       else setLoading(true);
@@ -101,19 +109,26 @@ export default function DhcpActive() {
       if (!res.ok) {
         throw new Error(
           parsed?.detail || parsed?.message || parsed?.error ||
-          rawText || "Gagal mengambil data user active"
+          rawText || "Failed to fetch active users"
         );
       }
 
+      if (seq !== reqSeq.current) return;
       const rows = parsed?.data || [];
       setData(Array.isArray(rows) ? rows : []);
-      setLastUpdate(new Date().toLocaleString("id-ID"));
+      setOffline(Array.isArray(parsed?.errors) ? parsed.errors : []);
+      setLastUpdate(new Date().toLocaleTimeString("en-GB"));
     } catch (err) {
-      if (!isBackground) setData([]);
-      setError(err.message || "Terjadi kesalahan");
+      if (seq !== reqSeq.current) return;
+      // Polling di latar: data terakhir tetap ditampilkan, cukup tampilkan pesan error.
+      if (!isBackground) { setData([]); setOffline([]); }
+      setError(err.message || "Something went wrong");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (seq === reqSeq.current) {
+        busyRef.current = false;
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
@@ -167,13 +182,13 @@ export default function DhcpActive() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: NS.font, color: NS.text }}>
       <PageHeader
         title="Active Users"
-        subtitle={`${data.length} devices connected (MikroTik DHCP) · ${refreshing ? "updating…" : `updated ${lastUpdate || "—"}`}`}
+        subtitle={`${data.length} devices connected (MikroTik DHCP) · updated ${lastUpdate || "—"}${offline.length ? ` · ${offline.length} router offline` : ""}`}
       />
 
       <Panel title="Filter" pad={12}>
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: isMobile ? "1fr 1fr" : "2fr 1fr 1fr" }}>
           <div style={{ gridColumn: isMobile ? "1 / -1" : "auto" }}>
-            <Field label="Cari">
+            <Field label="Search">
               <input
                 type="text"
                 placeholder="IP, MAC, hostname, router…"
@@ -187,32 +202,49 @@ export default function DhcpActive() {
             <select value={routerId} onChange={(e) => setRouterId(e.target.value)} style={fieldStyle}>
               {routerOptions.map((r) => {
                 const n = r.value === "all" ? null : routerCounts.find((c) => c.name === r.label)?.count;
-                return <option key={r.value} value={r.value}>{r.label}{n != null ? ` (${n})` : ""}</option>;
+                const down = offline.some((o) => String(o.router_id) === r.value);
+                return <option key={r.value} value={r.value}>{r.label}{down ? " (offline)" : n != null ? ` (${n})` : ""}</option>;
               })}
             </select>
           </Field>
-          <Field label="Baris per halaman">
+          <Field label="Rows per page">
             <select value={rowsPerPage} onChange={(e) => setRowsPerPage(e.target.value)} style={fieldStyle}>
               <option value="10">10</option>
               <option value="25">25</option>
               <option value="50">50</option>
               <option value="100">100</option>
-              <option value="all">Semua</option>
+              <option value="all">All</option>
             </select>
           </Field>
         </div>
       </Panel>
 
-      {error && <Alert tone="bad" title="Gagal memuat data">{error}</Alert>}
+      {error && (
+        <Alert tone="bad" title="Failed to load data">
+          {error}{data.length > 0 && " — showing the last data received, retrying every 5 seconds."}
+        </Alert>
+      )}
 
-      <Panel title="Daftar User Aktif" right={!loading && !error ? `Total: ${filteredData.length}` : null}>
-        {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: NS.label, fontSize: 13 }}>Memuat data DHCP…</div>
-        ) : error ? null : isMobile ? (
+      {offline.length > 0 && (
+        <Alert tone="warn" title={`${offline.map((o) => o.router_name).join(", ")} offline`}>
+          Router can't be reached right now, so users at that site aren't counted. Other routers keep updating — retrying every 5 seconds.
+          {offline.map((o) => (
+            <div key={o.router_id} style={{ marginTop: 4, fontSize: 11.5, color: NS.label, overflowWrap: "anywhere" }}>
+              <b>{o.router_name}:</b> {o.error}
+            </div>
+          ))}
+        </Alert>
+      )}
+
+      {loading ? (
+        <Panel pad={24}><div style={{ textAlign: "center", color: NS.label, fontSize: 13 }}>Loading active users…</div></Panel>
+      ) : !(error && data.length === 0) && (
+      <Panel title="Active Users List" right={`Total: ${filteredData.length}`}>
+        {isMobile ? (
           displayedData.length > 0 ? displayedData.map((item, index) => (
             <MItem key={item[".id"] || `${item.address}-${index}`} i={index}
               title={<span style={{ color: NS.link }}>{item.address || "—"}</span>}
-              sub={item["host-name"] || "Tanpa hostname"}
+              sub={item["host-name"] || "No hostname"}
               right={<span style={{ color: NS.ok, fontWeight: 700 }}>{item.status || "Active"}</span>}>
               <MFacts cols={2} items={[
                 ["Router", item.router_name || "—"],
@@ -256,23 +288,24 @@ export default function DhcpActive() {
           </div>
         )}
 
-        {!loading && !error && filteredData.length > 0 && (
+        {filteredData.length > 0 && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: NS.zebra, gap: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, color: NS.label }}>
-              Menampilkan <b style={{ color: NS.text }}>{startRow}–{endRow}</b> dari <b style={{ color: NS.text }}>{filteredData.length}</b> data
+              Showing <b style={{ color: NS.text }}>{startRow}–{endRow}</b> of <b style={{ color: NS.text }}>{filteredData.length}</b>
             </span>
             {rowsPerPage !== "all" && (
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
-                  style={btn(false, currentPage === 1)}>‹ Sebelumnya</button>
+                  style={btn(false, currentPage === 1)}>‹ Previous</button>
                 <span style={{ fontSize: 13, fontWeight: 700, padding: "0 6px" }}>{currentPage} / {totalPages}</span>
                 <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
-                  style={btn(false, currentPage === totalPages)}>Berikutnya ›</button>
+                  style={btn(false, currentPage === totalPages)}>Next ›</button>
               </div>
             )}
           </div>
         )}
       </Panel>
+      )}
     </div>
   );
 }
@@ -280,8 +313,8 @@ export default function DhcpActive() {
 function EmptyState() {
   return (
     <div style={{ textAlign: "center", padding: "32px 24px" }}>
-      <div style={{ color: NS.text, fontSize: 14, fontWeight: 600 }}>Tidak ada data</div>
-      <div style={{ color: NS.label, fontSize: 13, marginTop: 4 }}>Coba ubah pencarian atau router yang dipilih.</div>
+      <div style={{ color: NS.text, fontSize: 14, fontWeight: 600 }}>No data</div>
+      <div style={{ color: NS.label, fontSize: 13, marginTop: 4 }}>Try a different search or router.</div>
     </div>
   );
 }
