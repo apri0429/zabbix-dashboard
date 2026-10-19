@@ -4138,6 +4138,11 @@ def _check_noc_health(payload: Dict):
 def _notify_noc_blackout(gap: Dict):
     # Selama blackout tidak ada satu pun alert terkirim, jadi tanpa
     # pemberitahuan ini diamnya sistem tidak bisa dibedakan dari "aman".
+    # PC sengaja dimatikan sesuai jadwal (NOC_PLANNED_OFF_HOURS) -> bukan gangguan.
+    if noc_history.is_planned_gap(gap["started_at"], gap["ended_at"]):
+        logging.info("NOC: jeda %s - %s sesuai jadwal mati PC, tidak dikirim WA",
+                     gap["started_at"], gap["ended_at"])
+        return
     if gap["seconds"] >= NOC_BLACKOUT_NOTIFY_MIN_SECONDS:
         try:
             _send_whatsapp_message(_format_blackout_notice(gap))

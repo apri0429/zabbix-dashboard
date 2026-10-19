@@ -307,6 +307,88 @@ def _cutoff_iso(days: int) -> str:
     return (datetime.datetime.now() - datetime.timedelta(days=days)).strftime(_FMT)
 
 
+# ─── Jadwal mati terencana ───
+# PC server pemantau SENGAJA dimatikan tiap malam dan menyala otomatis lagi
+# (default 00:00-03:00). Jeda itu bukan gangguan pemantauan: tidak dihitung di
+# cakupan, tidak memicu WA "pemantauan sempat mati", dan tidak masuk daftar
+# "tidak terpantau". Format "HH:MM-HH:MM" (boleh lewat tengah malam, mis.
+# "23:00-02:00"); kosongkan untuk mematikan fitur ini. GRACE = toleransi menit di
+# kedua sisi untuk proses shutdown & booting/backend start.
+def _parse_planned(raw: str) -> Optional[Tuple[int, int]]:
+    import re as _re
+    m = _re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*", raw or "")
+    if not m:
+        return None
+    a = int(m.group(1)) * 60 + int(m.group(2) or 0)
+    b = int(m.group(3)) * 60 + int(m.group(4) or 0)
+    return (a, b) if a != b else None
+
+
+PLANNED_OFF_RAW = os.getenv("NOC_PLANNED_OFF_HOURS", "00:00-03:00")
+PLANNED_OFF = _parse_planned(PLANNED_OFF_RAW)
+try:
+    PLANNED_OFF_GRACE_SECONDS = max(0, int(os.getenv("NOC_PLANNED_OFF_GRACE_MINUTES", "20"))) * 60
+except ValueError:
+    PLANNED_OFF_GRACE_SECONDS = 20 * 60
+
+
+def planned_off_label() -> Optional[str]:
+    if not PLANNED_OFF:
+        return None
+    a, b = PLANNED_OFF
+    return f"{a // 60:02d}:{a % 60:02d}-{b // 60:02d}:{b % 60:02d}"
+
+
+def planned_windows(start_dt: datetime.datetime, end_dt: datetime.datetime
+                    ) -> List[Tuple[datetime.datetime, datetime.datetime]]:
+    """Rentang mati terencana (sudah + toleransi) yang menyentuh [start_dt, end_dt)."""
+    if not PLANNED_OFF or end_dt <= start_dt:
+        return []
+    a, b = PLANNED_OFF
+    grace = datetime.timedelta(seconds=PLANNED_OFF_GRACE_SECONDS)
+    out = []
+    day = start_dt.date() - datetime.timedelta(days=1)
+    while day <= end_dt.date():
+        s = datetime.datetime.combine(day, datetime.time()) + datetime.timedelta(minutes=a)
+        e = datetime.datetime.combine(day, datetime.time()) + datetime.timedelta(minutes=b)
+        if e <= s:                      # melewati tengah malam
+            e += datetime.timedelta(days=1)
+        s, e = s - grace, e + grace
+        if e > start_dt and s < end_dt:
+            out.append((max(s, start_dt), min(e, end_dt)))
+        day += datetime.timedelta(days=1)
+    return out
+
+
+def _minus(spans: List[Tuple[datetime.datetime, datetime.datetime]],
+           cut: List[Tuple[datetime.datetime, datetime.datetime]]
+           ) -> List[Tuple[datetime.datetime, datetime.datetime]]:
+    """spans dikurangi cut (keduanya daftar rentang)."""
+    out = []
+    for s, e in spans:
+        pieces = [(s, e)]
+        for cs, ce in cut:
+            nxt = []
+            for ps, pe in pieces:
+                if ce <= ps or cs >= pe:
+                    nxt.append((ps, pe))
+                    continue
+                if cs > ps:
+                    nxt.append((ps, cs))
+                if ce < pe:
+                    nxt.append((ce, pe))
+            pieces = nxt
+        out.extend(pieces)
+    return out
+
+
+def is_planned_gap(started_at: str, ended_at: str) -> bool:
+    """Jeda pemantauan yang (hampir) seluruhnya jatuh di jadwal mati terencana."""
+    s, e = _dt(started_at), _dt(ended_at)
+    rest = _minus([(s, e)], planned_windows(s, e))
+    return sum((pe - ps).total_seconds() for ps, pe in rest) <= MONITOR_GAP_THRESHOLD_SECONDS
+
+
 def get_blackouts(days: int = 7) -> List[Dict]:
     init_db()
     cutoff = _cutoff_iso(days)
@@ -323,9 +405,12 @@ def get_blackouts(days: int = 7) -> List[Dict]:
 
 
 def get_blackouts_range(start_dt: datetime.datetime,
-                        end_dt: datetime.datetime) -> List[Dict]:
+                        end_dt: datetime.datetime,
+                        include_planned: bool = True) -> List[Dict]:
     """Blackout pemantauan yang menyentuh window [start_dt, end_dt), masing-masing
-    sudah dipotong di batas window. `seconds` = lama blackout DI DALAM window."""
+    sudah dipotong di batas window. `seconds` = lama blackout DI DALAM window.
+    include_planned=False -> bagian yang jatuh di jadwal mati terencana dibuang
+    (dipakai cakupan pemantauan: mati terjadwal bukan gangguan)."""
     init_db()
     lo = start_dt.strftime(_FMT)
     hi = end_dt.strftime(_FMT)
@@ -359,6 +444,9 @@ def get_blackouts_range(start_dt: datetime.datetime,
                 merged[-1] = (merged[-1][0], e)
         else:
             merged.append((s, e))
+    if not include_planned:
+        merged = [p for p in _minus(merged, planned_windows(start_dt, end_dt))
+                  if (p[1] - p[0]).total_seconds() > 0]
 
     return [{"started_at": s.strftime(_FMT),
              "ended_at": e.strftime(_FMT),
@@ -376,7 +464,11 @@ def get_coverage(start_dt: datetime.datetime, end_dt: datetime.datetime) -> Dict
     now_dt = datetime.datetime.now()
     win_end = min(end_dt, now_dt)
     window_seconds = max(0.0, (win_end - start_dt).total_seconds())
-    blackouts = get_blackouts_range(start_dt, win_end) if window_seconds else []
+    # Jam mati terencana (PC dimatikan sengaja) tidak termasuk waktu yang
+    # seharusnya terpantau, dan bukan blackout.
+    planned_seconds = sum((e - s).total_seconds() for s, e in planned_windows(start_dt, win_end))
+    window_seconds = max(0.0, window_seconds - planned_seconds)
+    blackouts = get_blackouts_range(start_dt, win_end, include_planned=False) if window_seconds else []
     # get_blackouts_range sudah menggabungkan rentang yang bertumpuk/duplikat,
     # jadi penjumlahan di sini tidak menghitung rentang yang sama dua kali.
     blackout_seconds = sum(b["seconds"] for b in blackouts)
@@ -390,6 +482,8 @@ def get_coverage(start_dt: datetime.datetime, end_dt: datetime.datetime) -> Dict
         "coverage_pct": pct,
         "blackouts": blackouts,
         "blackout_count": len(blackouts),
+        "planned_off_seconds": int(planned_seconds),
+        "planned_off_label": planned_off_label(),
     }
 
 
@@ -799,6 +893,8 @@ def get_unmonitored_range(start_dt: datetime.datetime, end_dt: datetime.datetime
 
     blackouts = [(_dt(b["started_at"]), _dt(b["ended_at"]))
                  for b in get_blackouts_range(win_start, win_end)]
+    # Jadwal mati terencana + jeda booting sesudahnya juga bukan "tidak terpantau".
+    blackouts += planned_windows(win_start, win_end)
 
     def _gaps(track_from, spans):
         out_g, cur = [], track_from

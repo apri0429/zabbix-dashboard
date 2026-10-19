@@ -392,6 +392,7 @@ export default function NetworkLog() {
                 <li><b>Internet</b> = sambungan internet dari penyedia di tiap lokasi. <b>Perangkat</b> = alat jaringan di kantor, seperti WiFi dan switch.</li>
                 <li><b>Normal</b> berarti sedang tersambung. <b>Mati</b> berarti sedang tidak bisa dihubungi.</li>
                 <li><b>Kestabilan</b>: <i>Sangat stabil</i> hampir tidak pernah putus, <i>Stabil</i> sesekali putus sebentar, <i>Kurang stabil</i> dan <i>Sering terputus</i> perlu ditindaklanjuti. <i>Tidak terpantau</i> berarti statusnya sekarang tidak bisa dibaca, jadi kestabilannya belum bisa dinilai.</li>
+                {cov?.planned_off_label && <li><b>Jam {cov.planned_off_label}</b> PC pemantau sengaja dimatikan setiap malam. Jam itu tidak dihitung sebagai gangguan pemantauan.</li>}
                 <li>Putus yang lebih singkat dari <b>{minMin} menit</b> tidak dicatat, supaya daftar tidak ramai.</li>
                 <li>Klik nama untuk melihat kapan saja ia pernah mati dan hidup lagi.</li>
               </ul>

@@ -819,6 +819,9 @@ def _wa_text(data: Dict, narrative: Optional[str], title: str, pdf_follows: bool
     lat = _wa_latency_block(data)
     if lat:
         head += "\n\n" + lat
+    if noc_history.planned_off_label():
+        head += (f"\n\n🌙 _PC pemantau dimatikan terjadwal tiap {noc_history.planned_off_label()}; "
+                 "jam itu tidak dihitung sebagai gangguan pemantauan._")
     if narrative:
         head += "\n\n━━━━━━━━━━━━━━\n🤖 *Ringkasan AI*\n" + _wa_narrative(narrative)
     head += ("\n\n📎 _PDF lengkap menyusul._" if pdf_follows
