@@ -198,8 +198,9 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
     persis mulai.
 
     - state SAMA dgn sebelum mati:
-        * jeda <= GAP_CARRY_FORWARD_MAX_SECONDS (restart singkat), atau state UP
-          → event lama DITERUSKAN.
+        * jeda <= GAP_CARRY_FORWARD_MAX_SECONDS (restart singkat), state UP, atau
+          `since` jatuh SEBELUM jeda (router/Zabbix membuktikan statusnya tidak
+          berubah sepanjang jeda) → event lama DITERUSKAN.
         * jeda panjang → event lama DITUTUP di `gap_start`, lalu dibuka event baru
           di `since` (kalau router melaporkan status sekarang mulai sesudah jeda)
           atau di sekarang. Alasannya: kita hanya tahu perangkat DOWN di dua titik,
@@ -248,6 +249,13 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
                             or gap_seconds <= GAP_CARRY_FORWARD_MAX_SECONDS):
                         continue
                     since_dt = _safe_parse(cur.get("since"))
+                    if since_dt and gap_start_dt and since_dt <= gap_start_dt:
+                        # Router/Zabbix (yang tetap jalan selama backend mati)
+                        # melaporkan status ini sudah berlaku SEBELUM jeda ->
+                        # terbukti DOWN terus sepanjang jeda: event diteruskan.
+                        # Tanpa ini tiap malam (PC mati 00:00-03:00) satu insiden
+                        # terpecah jadi dua dengan "pulih" palsu jam 23:59.
+                        continue
                     if since_dt and gap_start_dt and gap_start_dt < since_dt <= now_dt:
                         # Router melaporkan status sekarang baru mulai SESUDAH
                         # pemantauan mati -> perangkat sempat pulih di tengah jeda.

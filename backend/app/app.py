@@ -3966,6 +3966,42 @@ def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     current = {e["key"]: e for e in entities}
 
+    # 0) Key = "device:<router>:<host>", jadi kalau host/IP perangkat diganti di
+    #    Netwatch, key lamanya hilang dan gangguannya nyangkut selamanya (WA UP
+    #    tidak pernah keluar). Pindahkan ke key baru bila nama di router yang
+    #    sama cocok; kalau perangkatnya dihapus, tutup gangguannya. Hanya kalau
+    #    sumbernya terbaca (masih ada entity lain berprefix sama) -- router yang
+    #    gagal dibaca tetap menyertakan key lamanya sebagai UNKNOWN.
+    prefixes = {e["key"].rsplit(":", 1)[0] for e in entities}
+    by_name = {}
+    for e in entities:
+        by_name.setdefault((e["key"].rsplit(":", 1)[0], e["name"]), e["key"])
+    for key, entry in list(_WA_PENDING_DOWN.items()):
+        prefix = key.rsplit(":", 1)[0]
+        if key in current or prefix not in prefixes:
+            continue
+        _WA_PENDING_DOWN.pop(key, None)
+        name = entry["change"].get("name")
+        new_key = by_name.get((prefix, name))
+        if new_key:
+            other = _WA_PENDING_DOWN.get(new_key)
+            if other is None or (entry["notified"] and not other["notified"]):
+                entry["change"]["key"] = new_key
+                _WA_PENDING_DOWN[new_key] = entry
+            logging.info("NOC WA: gangguan %s dipindah %s -> %s (host diganti)", name, key, new_key)
+        elif entry["notified"]:
+            try:
+                _send_whatsapp_message("\n".join([
+                    "ℹ️ *NOC — TIDAK DIPANTAU LAGI*",
+                    "━━━━━━━━━━━━━━",
+                    f"*{name}*",
+                    f"🔻 Down sejak : {entry['change'].get('changed_at') or '-'}",
+                    "Perangkat ini sudah dihapus / diubah di Netwatch, jadi "
+                    "status pulihnya tidak bisa dipantau lagi.",
+                ]))
+            except Exception:
+                logging.exception("NOC WA: kirim pemberitahuan perangkat dihapus gagal")
+
     def _real_since(e: Dict, fallback: float) -> float:
         # Jam mati asli dari router/Zabbix; abaikan kalau di masa depan.
         t = _ts_epoch(e.get("since")) if e.get("state") == "DOWN" else None
@@ -4081,6 +4117,18 @@ def _noc_health_problems(payload: Dict) -> Dict[str, Dict]:
     # router hidup tapi API-nya tidak bisa diakses.
     for d in payload.get("devices") or []:
         if not d.get("router_failed"):
+            # Router terbaca, tapi Netwatch-nya sendiri tidak bisa menentukan
+            # status host ini (UNKNOWN) -> kalau mati pun tidak akan ada alert DOWN.
+            if d.get("state") == "UNKNOWN" and d.get("host"):
+                out[f"unknown:{_device_key(d)}"] = {
+                    "icon": "❔",
+                    "title": f"{d.get('name') or d['host']} status UNKNOWN",
+                    "recovered": f"{d.get('name') or d['host']} terbaca lagi",
+                    "detail": "Netwatch MikroTik tidak bisa menentukan status host ini, "
+                              "jadi kalau mati tidak akan ada alert DOWN. Cek entri "
+                              "Netwatch-nya (host, src-address, routing-table).",
+                    "lokasi": d.get("router_name") or "-",
+                }
             continue
         rn = d.get("router_name") or "-"
         if d.get("state") == "DOWN":
@@ -4136,7 +4184,32 @@ def _format_health_alert(info: Dict, started: str, recovered_at: Optional[str] =
     return "\n".join(lines)
 
 
+_WA_HEALTH_STATE_KEY = "wa_health"
+_WA_HEALTH_LOADED = False
+
+
 def _check_noc_health(payload: Dict):
+    global _WA_HEALTH_LOADED
+    # Disimpan ke DB seperti _WA_PENDING_DOWN: tanpa itu restart (PC nyala jam 3
+    # pagi) membuat alert yang sudah terkirim dikirim ulang dan WA pulihnya hilang.
+    if not _WA_HEALTH_LOADED:
+        _WA_HEALTH_LOADED = True
+        try:
+            raw = noc_history.kv_get(_WA_HEALTH_STATE_KEY)
+            if raw:
+                _WA_HEALTH.update(json.loads(raw))
+        except Exception:
+            logging.exception("NOC WA: gagal memuat status alert pemantauan")
+    try:
+        _check_noc_health_inner(payload)
+    finally:
+        try:
+            noc_history.kv_set(_WA_HEALTH_STATE_KEY, json.dumps(_WA_HEALTH))
+        except Exception:
+            logging.exception("NOC WA: gagal menyimpan status alert pemantauan")
+
+
+def _check_noc_health_inner(payload: Dict):
     now = time.time()
     fmt = "%Y-%m-%d %H:%M:%S"
     problems = _noc_health_problems(payload)
@@ -4408,6 +4481,11 @@ def api_noc_wa_status():
             "retry_at": (datetime.datetime.fromtimestamp(e["retry_at"]).strftime("%H:%M:%S")
                          if e.get("retry_at") else None),
         } for k, e in _WA_PENDING_DOWN.items()],
+        "health": [{
+            "key": k, "title": e["info"].get("title"),
+            "since": datetime.datetime.fromtimestamp(e["since"]).strftime("%Y-%m-%d %H:%M:%S"),
+            "notified": e["notified"],
+        } for k, e in _WA_HEALTH.items()],
     }
 
 
