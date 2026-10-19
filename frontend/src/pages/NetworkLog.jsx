@@ -86,6 +86,11 @@ function upText(x) {
 const sinceNow = (d) => fmtDur(Math.max(0, Math.round((Date.now() - d.getTime()) / 1000)));
 const uptimeColor = (p) => (p == null ? T.muted : p >= 99.9 ? T.ok : p >= 99 ? T.warn : T.bad);
 const quality = (p) => (p == null ? "Belum ada data" : p >= 99.9 ? "Sangat stabil" : p >= 99 ? "Stabil" : p >= 95 ? "Kurang stabil" : "Sering terputus");
+// Uptime hanya menghitung waktu DOWN yang terbukti. Kalau statusnya sekarang tidak
+// terpantau (router site tidak bisa dibaca), angka 100% itu bukan bukti stabil.
+const unmonitored = (e) => e.state === "UNKNOWN" || e.state === "INACTIVE";
+const stabilityText = (e) => (unmonitored(e) ? "Tidak terpantau" : quality(e.uptime_pct));
+const stabilityColor = (e) => (unmonitored(e) ? T.muted : uptimeColor(e.uptime_pct));
 const troubleText = (e) => (e.incidents ? `${e.incidents} kali putus, total ${fmtDur(e.downtime_seconds)}` : "Tidak pernah putus");
 
 function downloadCsv(filename, rows) {
@@ -357,7 +362,7 @@ export default function NetworkLog() {
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 <li><b>Internet</b> = sambungan internet dari penyedia di tiap lokasi. <b>Perangkat</b> = alat jaringan di kantor, seperti WiFi dan switch.</li>
                 <li><b>Normal</b> berarti sedang tersambung. <b>Mati</b> berarti sedang tidak bisa dihubungi.</li>
-                <li><b>Kestabilan</b>: <i>Sangat stabil</i> hampir tidak pernah putus, <i>Stabil</i> sesekali putus sebentar, <i>Kurang stabil</i> dan <i>Sering terputus</i> perlu ditindaklanjuti.</li>
+                <li><b>Kestabilan</b>: <i>Sangat stabil</i> hampir tidak pernah putus, <i>Stabil</i> sesekali putus sebentar, <i>Kurang stabil</i> dan <i>Sering terputus</i> perlu ditindaklanjuti. <i>Tidak terpantau</i> berarti statusnya sekarang tidak bisa dibaca, jadi kestabilannya belum bisa dinilai.</li>
                 <li>Putus yang lebih singkat dari <b>{minMin} menit</b> tidak dicatat, supaya daftar tidak ramai.</li>
                 <li>Klik nama untuk melihat kapan saja ia pernah mati dan hidup lagi.</li>
               </ul>
@@ -433,7 +438,7 @@ export default function NetworkLog() {
                       right={<b style={{ color: st.fg }}>{st.label}</b>}>
                       {since && <div style={{ fontSize: 12, color: T.bad, marginBottom: 6 }}>sejak {clock(since)}, sudah {sinceNow(since)}</div>}
                       <MFacts cols={2} items={[
-                        ["Kestabilan", <><span style={{ color: uptimeColor(e.uptime_pct) }}>{quality(e.uptime_pct)}</span><div style={{ fontWeight: 400, fontSize: 11.5, color: T.label }}>{troubleText(e)}</div></>],
+                        ["Kestabilan", <><span style={{ color: stabilityColor(e) }}>{stabilityText(e)}</span><div style={{ fontWeight: 400, fontSize: 11.5, color: T.label }}>{troubleText(e)}</div></>],
                         ["Terakhir putus", last ? <>{lastAt.getDate()} {BULAN[lastAt.getMonth()]} · {clock(lastAt)}<div style={{ fontWeight: 400, fontSize: 11.5, color: last.ongoing ? T.bad : T.label }}>{last.ongoing ? "belum hidup" : `Hidup ${upText(last)}`}</div></> : "–"],
                       ]} />
                     </MItem>
@@ -465,7 +470,7 @@ export default function NetworkLog() {
                               {since && <div style={{ fontWeight: 400, fontSize: 12 }}>sejak {clock(since)}, sudah {sinceNow(since)}</div>}
                             </td>
                             <td style={td}>
-                              <div style={{ color: uptimeColor(e.uptime_pct), fontWeight: 700 }}>{quality(e.uptime_pct)}</div>
+                              <div style={{ color: stabilityColor(e), fontWeight: 700 }}>{stabilityText(e)}</div>
                               <div style={{ fontSize: 12, color: T.label }}>{troubleText(e)}</div>
                             </td>
                             <td style={{ ...td, whiteSpace: "nowrap" }}>

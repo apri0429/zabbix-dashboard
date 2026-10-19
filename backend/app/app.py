@@ -3333,11 +3333,47 @@ def _ping_host(host: Optional[str], count: int = 2, wait_s: int = 1) -> Optional
     return r.returncode == 0 and "ttl=" in r.stdout.decode(errors="ignore").lower()
 
 
+def _site_devices_reachable(router_name: Optional[str], router_host: Optional[str],
+                            limit: int = 4) -> Optional[bool]:
+    """Ping beberapa perangkat LAN site (host Netwatch yang pernah tercatat untuk
+    router ini). True = minimal satu membalas, False = semua diam, None = tidak
+    ada perangkat yang bisa dicek (tidak bisa dipastikan)."""
+    if not router_name:
+        return None
+    import ipaddress
+    try:
+        conn = noc_history._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT entity_key FROM noc_events WHERE kind = 'device' AND entity_key LIKE ?",
+                (f"device:{router_name}:%",),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    hosts = []
+    for r in rows:
+        h = r["entity_key"].rsplit(":", 1)[1]
+        try:
+            ip = ipaddress.ip_address(h)
+        except ValueError:
+            continue
+        if ip.is_private and h != router_host and h not in hosts:
+            hosts.append(h)
+    if not hosts:
+        return None
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(limit, len(hosts))) as pool:
+        replies = list(pool.map(lambda h: _ping_host(h, count=1, wait_s=1), hosts[:limit]))
+    return any(replies)
+
+
 def _diagnose_router(row: Dict) -> Dict:
     """Router yang Netwatch-nya gagal dibaca: tentukan DOWN atau cuma API-nya
     yang bermasalah, plus penyebab yang paling mungkin.
 
-    - Router bisa di-ping / koneksi API "ditolak" (router membalas) -> router
+    - Router bisa di-ping DAN perangkat lain di site-nya juga membalas -> router
       hidup, API-nya saja yang tidak bisa diakses -> UNKNOWN (tidak terpantau).
     - Router tidak bisa di-ping -> DOWN. Kalau MIKROTIK_<n>_PUBLIC_HOST diisi
       (IP publik / DDNS router site), dipakai untuk membedakan VPN putus
@@ -3345,7 +3381,16 @@ def _diagnose_router(row: Dict) -> Dict:
     err = (row.get("error") or "").strip()
     host = row.get("router_host")
     lan = _ping_host(host)
-    if lan or "ditolak" in err.lower():
+    # Balasan ping / "koneksi ditolak" belum tentu dari router site: kalau VPN
+    # putus, paket ke IP LAN site (mis. 192.168.3.1) bocor lewat default route
+    # ke internet dan bisa dibalas perangkat lain di jaringan ISP yang kebetulan
+    # ber-IP sama. Jadi dicek silang ke perangkat lain di site itu: kalau tak
+    # satu pun membalas, balasan tadi dianggap palsu -> router DOWN.
+    if lan:
+        site_ok = _site_devices_reachable(row.get("router_name"), host)
+        if site_ok is False:
+            lan = False
+    if lan:
         return {"state": "UNKNOWN",
                 "cause": f"*ROUTER bermasalah (API)* — router hidup tapi API MikroTik tidak bisa diakses "
                          f"({err[:120] or 'tanpa keterangan'}). Cek service API, port, dan firewall router."}
