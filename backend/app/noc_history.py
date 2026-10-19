@@ -1189,6 +1189,34 @@ def get_open_entity_keys() -> set:
     return {r["entity_key"] for r in rows}
 
 
+def _kv_conn():
+    init_db()
+    conn = _connect()
+    conn.execute("CREATE TABLE IF NOT EXISTS noc_kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+    return conn
+
+
+def kv_get(k: str) -> Optional[str]:
+    """Nilai kecil yang harus bertahan saat backend restart (mis. status alert WA)."""
+    conn = _kv_conn()
+    try:
+        row = conn.execute("SELECT v FROM noc_kv WHERE k = ?", (k,)).fetchone()
+    finally:
+        conn.close()
+    return row["v"] if row else None
+
+
+def kv_set(k: str, v: str):
+    with _lock:
+        conn = _kv_conn()
+        try:
+            conn.execute("INSERT INTO noc_kv (k, v) VALUES (?, ?) "
+                         "ON CONFLICT(k) DO UPDATE SET v = excluded.v", (k, v))
+            conn.commit()
+        finally:
+            conn.close()
+
+
 def get_recent_entities(prefix: str, days: int = 7) -> Dict[str, str]:
     """{entity_key: nama terakhir} untuk entity ber-key `prefix`* yang tercatat dalam
     `days` hari terakhir. Dipakai untuk menandai perangkat di belakang router yang

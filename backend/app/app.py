@@ -3804,9 +3804,24 @@ def _format_noc_alert(change: Dict) -> str:
     return "\n".join(lines)
 
 
+_WA_LAST_SEND: Dict[str, object] = {}   # hasil kirim WA terakhir (untuk /api/noc/wa/status)
+
+
 def _send_whatsapp_message(message: str) -> bool:
     """Kirim WA ke semua WA_TO. True = terkirim (minimal ke satu nomor), supaya
     alert yang gagal dikirim bisa dicoba lagi di polling berikutnya."""
+    ok = _send_whatsapp_message_raw(message)
+    _WA_LAST_SEND.update({
+        "at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ok": ok, "enabled": WA_ALERT_ENABLED, "mode": WA_ALERT_MODE,
+        "preview": (message or "").splitlines()[0][:80] if message else "",
+    })
+    if not ok and WA_ALERT_ENABLED:
+        logging.warning("NOC WA: pesan TIDAK terkirim (mode=%s): %s", WA_ALERT_MODE, _WA_LAST_SEND["preview"])
+    return ok
+
+
+def _send_whatsapp_message_raw(message: str) -> bool:
     if not WA_ALERT_ENABLED:
         return False
     try:
@@ -3874,6 +3889,32 @@ WA_ALERT_MIN_DOWN_SECONDS = noc_history.MIN_INCIDENT_SECONDS
 # itu = masih gangguan yang sama, jadi tidak ada WA DOWN/UP berulang.
 WA_ALERT_MIN_UP_SECONDS = noc_history.FLAP_MERGE_GAP_SECONDS
 _WA_PENDING_DOWN: Dict[str, Dict] = {}   # key -> {"change", "since", "notified"}
+# Status di atas DISIMPAN ke database. Dulu hanya di memori: setiap backend
+# restart (deploy, PC dinyalakan jam 3 pagi) status "WA DOWN sudah terkirim"
+# hilang lalu ditebak dari lamanya DOWN, sehingga gangguan yang belum sempat
+# dikirim dianggap sudah dikirim dan WA-nya tidak pernah keluar.
+_WA_STATE_KEY = "wa_pending_down"
+_WA_STATE_LOADED = False
+
+
+def _load_wa_pending():
+    global _WA_STATE_LOADED
+    if _WA_STATE_LOADED:
+        return
+    _WA_STATE_LOADED = True
+    try:
+        raw = noc_history.kv_get(_WA_STATE_KEY)
+        if raw:
+            _WA_PENDING_DOWN.update(json.loads(raw))
+    except Exception:
+        logging.exception("NOC WA: gagal memuat status alert tersimpan")
+
+
+def _save_wa_pending():
+    try:
+        noc_history.kv_set(_WA_STATE_KEY, json.dumps(_WA_PENDING_DOWN))
+    except Exception:
+        logging.exception("NOC WA: gagal menyimpan status alert")
 
 # Pemberitahuan "pemantauan sempat mati" hanya dikirim kalau jedanya cukup lama,
 # supaya restart biasa / deploy tidak jadi spam. 0 = matikan pemberitahuan ini.
@@ -3957,10 +3998,10 @@ def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
                            "old_state": "UP", "new_state": "DOWN",
                            "changed_at": datetime.datetime.fromtimestamp(started).strftime("%Y-%m-%d %H:%M:%S")},
                 "since": started,
-                # Sudah lama DOWN sebelum backend hidup -> alert-nya sudah terkirim
-                # sebelum restart; jangan dikirim ulang.
-                "notified": now - (_ts_epoch(ev.get("started_at")) or now)
-                            >= WA_ALERT_MIN_DOWN_SECONDS + 2 * NOC_HISTORY_POLL_SECONDS,
+                # Tidak ada catatan alert tersimpan untuk gangguan ini -> anggap
+                # BELUM dikirim. Lebih baik satu WA dobel daripada gangguan yang
+                # tidak pernah dilaporkan (status terkirim kini disimpan di DB).
+                "notified": False,
             }
 
     # 3) Pulih: dinilai dari status sekarang. UNKNOWN belum dianggap pulih.
@@ -4022,6 +4063,7 @@ def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
             entry["cause"] = cause
         else:
             entry["retry_at"] = now + WA_ALERT_RETRY_SECONDS
+    _save_wa_pending()
 
 
 # Masalah pemantauannya sendiri (bukan perangkat DOWN): router yang Netwatch-nya
@@ -4218,6 +4260,7 @@ def _poll_noc_history():
     # Deteksi kalau polling sempat berhenti lama (server dimatikan / backend crash /
     # PC sleep semalaman -- proses tetap hidup jadi startup handler nggak jalan)
     gap = None
+    _load_wa_pending()
     try:
         gap = noc_history.record_monitoring_gap()
     except Exception:
@@ -4331,6 +4374,30 @@ _scheduler.add_job(
     id="noc_history_cleanup",
     replace_existing=True,
 )
+
+
+@app.get("/api/noc/wa/status")
+def api_noc_wa_status():
+    """Diagnosa alert WA: aktif/tidak, hasil kirim terakhir, dan gangguan yang
+    sedang menunggu / sudah dikirim. Hanya membaca, tidak mengirim apa pun."""
+    now = time.time()
+    return {
+        "success": True,
+        "enabled": WA_ALERT_ENABLED,
+        "mode": WA_ALERT_MODE,
+        "recipients": len(WA_TO),
+        "min_down_seconds": WA_ALERT_MIN_DOWN_SECONDS,
+        "last_send": _WA_LAST_SEND or None,
+        "pending": [{
+            "name": e["change"].get("name"), "key": k,
+            "down_since": e["change"].get("changed_at"),
+            "down_seconds": int(now - e["since"]),
+            "notified": e["notified"],
+            "send_in_seconds": max(0, int(e["since"] + WA_ALERT_MIN_DOWN_SECONDS - now)) if not e["notified"] else 0,
+            "retry_at": (datetime.datetime.fromtimestamp(e["retry_at"]).strftime("%H:%M:%S")
+                         if e.get("retry_at") else None),
+        } for k, e in _WA_PENDING_DOWN.items()],
+    }
 
 
 @app.get("/api/noc/history")
