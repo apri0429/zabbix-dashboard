@@ -245,7 +245,7 @@ export default function DhcpActive() {
             <MItem key={item[".id"] || `${item.address}-${index}`} i={index}
               title={<span style={{ color: NS.link }}>{item.address || "—"}</span>}
               sub={item["host-name"] || "No hostname"}
-              right={<span style={{ color: NS.ok, fontWeight: 700 }}>{item.status || "Active"}</span>}>
+              right={<span style={{ color: NS.ok, fontWeight: 700 }}>Connected</span>}>
               <MFacts cols={2} items={[
                 ["Router", item.router_name || "—"],
                 ["MAC Address", item["mac-address"] || "—"],
@@ -277,7 +277,7 @@ export default function DhcpActive() {
                       <td style={{ ...td, color: NS.label }}>{item["mac-address"] || "—"}</td>
                       <td style={td}>{item["host-name"] || "—"}</td>
                       <td style={{ ...td, color: NS.label }}>{item.server || "—"}</td>
-                      <td style={{ ...td, color: NS.ok, fontWeight: 700 }}>{item.status || "Active"}</td>
+                      <td style={{ ...td, color: NS.ok, fontWeight: 700 }}>Connected</td>
                     </tr>
                   );
                 }) : (

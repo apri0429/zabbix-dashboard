@@ -221,6 +221,10 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
     gap_start_dt = _safe_parse(gap_start)
     gap_seconds = ((now_dt - gap_start_dt).total_seconds()
                    if gap_start_dt else float("inf"))
+    # Jeda sesuai jadwal mati PC (00:00-03:00). Zabbix ada di PC yang sama, jadi
+    # ikut mati: problem-nya dibuat ulang (clock ~03:00) dan beberapa menit
+    # pertama datanya basi (UNKNOWN). Keduanya bukan bukti perangkat sempat pulih.
+    planned = bool(gap_start_dt) and is_planned_gap(gap_start, now)
     cur_by_key = {e["key"]: e for e in entities}
     with _lock:
         conn = _connect()
@@ -256,7 +260,14 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
                         # Tanpa ini tiap malam (PC mati 00:00-03:00) satu insiden
                         # terpecah jadi dua dengan "pulih" palsu jam 23:59.
                         continue
-                    if since_dt and gap_start_dt and gap_start_dt < since_dt <= now_dt:
+                    recovered_in_gap = bool(since_dt and gap_start_dt and gap_start_dt < since_dt <= now_dt)
+                    if planned and not (cur["kind"] == "device" and recovered_in_gap):
+                        # DOWN sebelum PC dimatikan & masih DOWN sesudah nyala ->
+                        # satu gangguan, dihitung dari jam mati aslinya. Hanya
+                        # Netwatch (router tetap jalan) yang bisa membuktikan
+                        # perangkat sempat pulih di tengah jeda.
+                        continue
+                    if recovered_in_gap:
                         # Router melaporkan status sekarang baru mulai SESUDAH
                         # pemantauan mati -> perangkat sempat pulih di tengah jeda.
                         new_started = since_dt.strftime(_FMT)
@@ -273,6 +284,11 @@ def reconcile_after_gap(entities: List[Dict], gap_start: str):
                         "VALUES (?, ?, ?, ?, ?)",
                         (cur["kind"], cur["key"], cur["name"], cur["state"], new_started),
                     )
+                    continue
+
+                if planned and r["state"] == "DOWN" and cur["state"] == "UNKNOWN":
+                    # Zabbix baru nyala, datanya belum segar -> event DOWN dibiarkan
+                    # terbuka; polling berikutnya yang meneruskan / menutupnya.
                     continue
 
                 # Transisi terjadi entah kapan selama blackout. Kalau ada `since`
@@ -390,6 +406,12 @@ def _minus(spans: List[Tuple[datetime.datetime, datetime.datetime]],
     return out
 
 
+def in_planned_window(dt: Optional[datetime.datetime] = None) -> bool:
+    """Apakah `dt` (default sekarang) jatuh di jadwal mati terencana + toleransi."""
+    dt = dt or datetime.datetime.now()
+    return bool(planned_windows(dt, dt + datetime.timedelta(seconds=1)))
+
+
 def is_planned_gap(started_at: str, ended_at: str) -> bool:
     """Jeda pemantauan yang (hampir) seluruhnya jatuh di jadwal mati terencana."""
     s, e = _dt(started_at), _dt(ended_at)
@@ -501,6 +523,9 @@ def record_snapshot(entities: List[Dict]):
     """
     init_db()
     now = _now_iso()
+    # Sesaat sesudah PC nyala lagi (masih dalam toleransi jadwal mati), Zabbix
+    # belum punya data segar -> UNKNOWN. Jangan putus insiden DOWN karena itu.
+    booting = in_planned_window()
     transitions = []
     with _lock:
         conn = _connect()
@@ -531,6 +556,8 @@ def record_snapshot(entities: List[Dict]):
 
                 # State berubah -> tutup event lama, buka event baru
                 old_state = row["state"]
+                if booting and old_state == "DOWN" and state == "UNKNOWN":
+                    continue
                 conn.execute("UPDATE noc_events SET ended_at = ? WHERE id = ?", (now, row["id"]))
                 conn.execute(
                     "INSERT INTO noc_events (kind, entity_key, entity_name, state, started_at) "

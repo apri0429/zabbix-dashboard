@@ -281,9 +281,8 @@ def _start_scheduler():
             if live:
                 _reconcile_noc_gap(gap, live)
             else:
-                logging.warning("NOC history: status live belum tersedia saat startup — event lama ditutup di titik terakhir")
-                noc_history.close_stale_open_events(close_at=gap["started_at"])
-                _notify_noc_blackout(gap)
+                logging.warning("NOC history: status live belum tersedia saat startup")
+                _close_events_after_gap(gap)
         # Tanpa jeda berarti (restart singkat): event terbuka DIBIARKAN, polling
         # pertama yang meneruskan / menutupnya. Dulu semuanya ditutup di sini lalu
         # dibuka ulang ~30 dtk kemudian -> insiden terpotong & jeda itu terhitung UP.
@@ -2387,7 +2386,7 @@ def make_pdf(summary: List[Dict], start_dt: datetime.datetime, end_dt: datetime.
         pdf.set_font("Helvetica", "I", 7)
         pdf.set_text_color(*_C_MUTED)
         pdf.multi_cell(0, 4,
-            f"Snapshot DHCP lease berstatus 'bound' saat laporan dibuat "
+            f"Jumlah perangkat yang sedang terhubung saat laporan dibuat "
             f"({end_dt.strftime('%d %b %Y %H:%M')}) - bukan rata-rata selama periode. "
             "Satu router bisa melayani lebih dari satu link ISP (beban dibagi antar ISP), "
             "jadi angka di sini per router, bukan per link.")
@@ -3017,7 +3016,7 @@ def send_email(
             "<div style='margin:14px 0 0;background:#f1f5f9;border-radius:6px;"
             "padding:10px 14px;font-size:11.5px;color:#475569;'>"
             f"<strong style='color:#0f2044;font-size:12.5px;'>{total_active}</strong> "
-            f"user aktif (DHCP lease 'bound', snapshot saat laporan dibuat){_bu}</div>"
+            f"perangkat terhubung (dihitung saat laporan dibuat){_bu}</div>"
         )
 
     cards_html = (
@@ -4031,7 +4030,10 @@ def _send_noc_alerts(transitions: List[Dict], entities: List[Dict]):
         open_events = noc_history.get_open_events()
         for e in missing:
             ev = open_events.get(e["key"]) or {}
-            started = _real_since(e, _ts_epoch(ev.get("started_at")) or now)
+            ev_started = _ts_epoch(ev.get("started_at")) if ev.get("state") == "DOWN" else None
+            # Ambil yang paling awal: sesudah PC mati terjadwal, Zabbix membuat
+            # problem baru (~03:00) padahal event di DB masih dari sebelum 00:00.
+            started = min(_real_since(e, now), ev_started or now)
             _WA_PENDING_DOWN[e["key"]] = {
                 "change": {"kind": e["kind"], "key": e["key"], "name": e["name"],
                            "old_state": "UP", "new_state": "DOWN",
@@ -4268,6 +4270,16 @@ def _notify_noc_blackout(gap: Dict):
             logging.exception("NOC history: kirim notifikasi blackout gagal")
 
 
+def _close_events_after_gap(gap: Dict):
+    """Status live belum bisa dibaca sesudah jeda. Jeda sesuai jadwal mati PC:
+    event dibiarkan terbuka (Zabbix di PC yang sama masih booting), polling
+    berikutnya yang meneruskan / menutupnya -- supaya gangguan yang mulai sebelum
+    00:00 tetap dihitung dari jam aslinya. Jeda lain: tutup di titik terakhir."""
+    if not noc_history.is_planned_gap(gap["started_at"], gap["ended_at"]):
+        noc_history.close_stale_open_events(close_at=gap["started_at"])
+    _notify_noc_blackout(gap)
+
+
 def _reconcile_noc_gap(gap: Dict, live: Dict):
     """Rekonsiliasi event sesudah jeda pemantauan pakai status terkini.
     "since" (dari clock problem Zabbix utk site, dari MikroTik Netwatch utk
@@ -4347,8 +4359,7 @@ def _poll_noc_history():
     except Exception:
         traceback.print_exc()
         if gap:
-            noc_history.close_stale_open_events(close_at=gap["started_at"])
-            _notify_noc_blackout(gap)
+            _close_events_after_gap(gap)
         return
 
     # Tanpa ini, perubahan yang terjadi selama jeda dicap waktu polling
@@ -5505,6 +5516,7 @@ def root():
         "version": "6.0.0-multi-history",
         "endpoints": [
             "/api/report/summary",
+            "/api/report/data-range",
             "/api/report/export-pdf",
             "/api/report/send-email",
             "/api/report/chart",
@@ -5586,6 +5598,60 @@ def api_mikrotik_status():
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+REPORT_RANGE_CACHE: Dict[str, Tuple[datetime.datetime, Dict]] = {}
+
+
+def _item_history_edge(itemid: str, order: str) -> Optional[int]:
+    rows = zabbix_request("history.get", {
+        "output": ["clock"],
+        "history": get_item_value_type(itemid),
+        "itemids": [itemid],
+        "sortfield": "clock",
+        "sortorder": order,
+        "limit": 1,
+    })
+    return int(rows[0]["clock"]) if rows else None
+
+
+@app.get("/api/report/data-range")
+def api_report_data_range():
+    """Rentang waktu yang benar-benar ada history-nya di Zabbix (item traffic
+    semua link). Dipakai kalender Traffic Report supaya hanya tanggal yang ada
+    datanya yang bisa dipilih -- history Zabbix dibuang housekeeper sesudah
+    masa simpannya (mis. 31 hari), jadi batas awalnya terus bergeser."""
+    cached = get_cache_value(REPORT_RANGE_CACHE, "range")
+    if cached is not None:
+        return cached
+
+    itemids = []
+    for cfg in ITEM_MAP.values():
+        host = cfg.get("host", "").strip()
+        for aliases in (cfg.get("recv", []), cfg.get("sent", [])):
+            itemid, _ = find_first_valid_itemid(host, aliases)
+            if itemid:
+                itemids.append(itemid)
+    if not itemids:
+        raise HTTPException(status_code=503, detail="Item traffic tidak ditemukan di Zabbix")
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(8, len(itemids))) as pool:
+        firsts = list(pool.map(lambda i: _item_history_edge(i, "ASC"), itemids))
+        lasts = list(pool.map(lambda i: _item_history_edge(i, "DESC"), itemids))
+    firsts = [t for t in firsts if t]
+    lasts = [t for t in lasts if t]
+    if not firsts or not lasts:
+        raise HTTPException(status_code=404, detail="Belum ada data history traffic di Zabbix")
+
+    # Dibulatkan ke menit di dalam rentang (input kalender per menit).
+    first_dt = datetime.datetime.fromtimestamp(min(firsts) + 59).replace(second=0)
+    last_dt = datetime.datetime.fromtimestamp(max(lasts)).replace(second=0)
+    return set_cache_value(REPORT_RANGE_CACHE, "range", {
+        "success": True,
+        "min": first_dt.strftime("%Y-%m-%dT%H:%M"),
+        "max": last_dt.strftime("%Y-%m-%dT%H:%M"),
+    })
 
 
 @app.get("/api/report/summary")

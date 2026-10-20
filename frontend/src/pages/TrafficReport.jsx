@@ -475,8 +475,17 @@ const SectionTitle = ({ children, subtitle, compact }) => (
 ═══════════════════════════════════════════════ */
 export default function TrafficReport() {
   const now = dayjs();
-  const minDate = now.subtract(1, "month").format("YYYY-MM-DDTHH:mm");
-  const maxDate = now.format("YYYY-MM-DDTHH:mm");
+  // Rentang kalender = rentang history yang benar-benar ada di Zabbix
+  // (/api/report/data-range). Sebelum termuat / kalau gagal: 1 bulan terakhir.
+  const [dataRange, setDataRange] = useState(null);
+  const minDate = dataRange?.min || now.subtract(1, "month").format("YYYY-MM-DDTHH:mm");
+  const maxDate = dataRange?.max || now.format("YYYY-MM-DDTHH:mm");
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/api/report/data-range`, { timeout:30000 })
+      .then(({ data }) => { if (data?.min && data?.max) setDataRange(data); })
+      .catch(() => {});
+  }, []);
 
   const { isMobile, isTablet } = useBreakpoint();
 
@@ -497,8 +506,8 @@ export default function TrafficReport() {
 
   const handleGenerate = async () => {
     if (!startDate || !endDate) { setError("Harap isi tanggal mulai dan akhir."); return; }
-    if (startDate < minDate)    { setError("Start date tidak boleh lebih dari 1 bulan ke belakang."); return; }
-    if (endDate > maxDate)      { setError("End date tidak boleh melebihi waktu sekarang."); return; }
+    if (startDate < minDate)    { setError(`Data Zabbix paling awal tersedia ${dayjs(minDate).format("DD MMM YYYY HH:mm")}.`); return; }
+    if (endDate > maxDate)      { setError(`Data Zabbix paling akhir tersedia ${dayjs(maxDate).format("DD MMM YYYY HH:mm")}.`); return; }
     if (startDate >= endDate)   { setError("Start date harus lebih awal dari end date."); return; }
     try {
       setLoading(true); setError("");
@@ -562,7 +571,8 @@ export default function TrafficReport() {
         </>}
       />
 
-      <Panel title="Periode Laporan" pad={12}>
+      <Panel title="Periode Laporan" pad={12}
+        right={dataRange ? `Data tersedia: ${dayjs(dataRange.min).format("DD MMM YYYY HH:mm")} – ${dayjs(dataRange.max).format("DD MMM YYYY HH:mm")}` : null}>
         <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr auto", gap:12, alignItems:"end" }}>
           <DateInput label="Mulai" value={startDate} onChange={setStartDate} min={minDate} max={endDate} />
           <DateInput label="Selesai" value={endDate} onChange={setEndDate} min={startDate} max={maxDate} />
