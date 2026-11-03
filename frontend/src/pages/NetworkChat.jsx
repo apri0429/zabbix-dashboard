@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import AgentIcon from "../components/AgentIcon";
 import axios from "axios";
 import dayjs from "dayjs";
 import {
-  Send01, Plus, SearchMd, Trash01, ArrowLeft, Stars02, RefreshCw01, XClose, Copy01, Check,
+  Send01, Plus, SearchMd, Trash01, ArrowLeft, MessageChatCircle, RefreshCw01, XClose, Copy01, Check,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
 import { NS, useIsMobile } from "../components/ns";
@@ -13,20 +14,20 @@ import { NS, useIsMobile } from "../components/ns";
 const STORAGE_KEY = "netrowatch-chats-v2";
 const MAX_CHATS = 50;
 
-/* Palet mengikuti tema NetSuite aplikasi (navy + biru korporat). */
+/* Palet chat senada header aplikasi: navy gelap + aksen emas. */
 const WA = {
-  teal: NS.primary,
+  teal: NS.navy,
   green: NS.ok,
-  head: "linear-gradient(90deg, #14284d 0%, #1d3a6e 50%, #26508f 100%)",
+  head: NS.navy,
   panel: NS.band,
   wall: "#eef2f7",
-  mine: "linear-gradient(135deg, #2f67c2 0%, #2a5db0 60%, #24519c 100%)",
+  mine: NS.navy,
   theirs: "#ffffff",
   text: NS.text,
   sub: NS.label,
   border: "#d5dbe4",
   active: NS.hover,
-  tick: NS.primary,
+  tick: NS.gold,
 };
 
 const SUGGESTIONS = [
@@ -37,27 +38,6 @@ const SUGGESTIONS = [
   "Bagaimana kondisi CPU dan memori semua router?",
   "Kapan terakhir internet Jatake putus?",
 ];
-
-// Nama sumber data dari backend (sebagian berakhiran periode, mis. "_7h") -> label.
-const TOOL_LABELS = [
-  ["get_live_status", "status live"],
-  ["find_devices", "daftar perangkat"],
-  ["get_network_history", "riwayat ISP & perangkat"],
-  ["get_site_uptime", "uptime site"],
-  ["get_downtime_log", "log downtime"],
-  ["get_bandwidth_summary", "bandwidth"],
-  ["profil_jaringan", "profil jaringan"],
-  ["perangkat_dan_problem", "perangkat & problem"],
-  ["user_dhcp_aktif", "user DHCP"],
-  ["status_router", "status router"],
-  ["trafik_port_live", "trafik port"],
-  ["queue_tree", "queue"],
-  ["riwayat_isp_perangkat", "riwayat ISP & perangkat"],
-  ["uptime_site", "uptime site"],
-  ["log_downtime", "log downtime"],
-  ["bandwidth", "bandwidth"],
-];
-const toolLabel = (t) => TOOL_LABELS.find(([k]) => t.startsWith(k))?.[1] || t;
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 const newChat = () => ({ id: newId(), title: "", updatedAt: Date.now(), messages: [] });
@@ -125,14 +105,16 @@ const DoubleTick = ({ color }) => (
   </svg>
 );
 
-function Avatar({ size = 40, user = false }) {
+function Avatar({ size = 40, user = false, animate = false }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%", flexShrink: 0,
       background: user ? NS.band : WA.teal, color: user ? WA.sub : "#fff",
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
-      <Stars02 width={size * 0.5} height={size * 0.5} />
+      {user
+        ? <MessageChatCircle width={size * 0.5} height={size * 0.5} />
+        : <AgentIcon size={size * 0.68} face={WA.teal} animate={animate} />}
     </div>
   );
 }
@@ -177,7 +159,7 @@ function Bubble({ m, onRetry, answered, first, mobile }) {
         borderRadius: bubbleRadius(mine, first),
         background: m.error ? "#fff1f0" : mine ? WA.mine : WA.theirs,
         border: m.error ? "1px solid #f3c5c5" : "none",
-        boxShadow: mine ? "0 1px 2px rgba(20,40,77,0.25)" : "0 1px 2px rgba(20,40,77,0.12)",
+        boxShadow: mine ? "0 1px 2px rgba(20,30,46,0.3)" : "0 1px 2px rgba(20,30,46,0.12)",
         color: m.error ? "#b42318" : mine ? "#fff" : WA.text,
         fontSize: mobile ? 14.5 : 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
       }}>
@@ -191,16 +173,6 @@ function Bubble({ m, onRetry, answered, first, mobile }) {
             }}>
               <RefreshCw01 width={13} height={13} /> Coba lagi
             </button>
-          </div>
-        )}
-        {m.tools?.length > 0 && (
-          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4, whiteSpace: "normal" }}>
-            {[...new Set(m.tools.map(toolLabel))].map((t) => (
-              <span key={t} style={{
-                fontSize: 10.5, fontWeight: 600, color: NS.link, background: "#eef3fb",
-                border: "1px solid #d6e2f5", borderRadius: 999, padding: "1px 8px",
-              }}>{t}</span>
-            ))}
           </div>
         )}
         <div style={{
@@ -427,20 +399,20 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
       <div style={{
         minHeight: phone ? 56 : 52, padding: isMobile ? "0 6px 0 4px" : "0 16px", paddingTop: compact ? "env(safe-area-inset-top)" : 0,
         background: WA.head, display: "flex", alignItems: "center", gap: isMobile ? 6 : 12, flexShrink: 0,
-        borderLeft: isMobile ? "none" : `1px solid ${WA.border}`, boxShadow: "0 1px 4px rgba(20,40,77,0.25)", zIndex: 1,
+        borderLeft: isMobile ? "none" : `1px solid ${WA.border}`, boxShadow: "0 1px 4px rgba(20,30,46,0.3)", zIndex: 1,
       }}>
         {isMobile && <IconBtn size={btnSize} title="Semua percakapan" onClick={() => setShowList(true)}><ArrowLeft width={19} height={19} /></IconBtn>}
         <div style={{ position: "relative", flexShrink: 0 }}>
-          <Avatar size={phone ? 36 : 32} />
+          <Avatar size={phone ? 36 : 32} animate />
           {info?.enabled && (
             <span style={{
               position: "absolute", right: -1, bottom: -1, width: 10, height: 10, borderRadius: "50%",
-              background: "#3ccf6e", border: "2px solid #1d3a6e",
+              background: "#3ccf6e", border: `2px solid ${NS.navy}`,
             }} />
           )}
         </div>
         <div style={{ minWidth: 0, flex: 1, marginLeft: 4 }}>
-          <div style={{ fontSize: phone ? 15 : 14, color: "#fff", fontWeight: 700, lineHeight: 1.25 }}>Hermes NOC</div>
+          <div style={{ fontSize: phone ? 15 : 14, color: "#fff", fontWeight: 700, lineHeight: 1.25 }}>Asisten AI NOC</div>
           <div style={{ fontSize: 11.5, color: loading ? "#9fe0a8" : "rgba(255,255,255,0.75)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {loading ? "sedang mengetik…" : disabled ? (info.offline ? "backend tidak terhubung" : "belum aktif") : info ? (compact ? "online" : "online · membaca seluruh data jaringan") : "menghubungkan…"}
           </div>
@@ -463,7 +435,7 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
 
         {disabled && (
           <div style={{ alignSelf: "center", margin: "8px 0", padding: "8px 14px", background: "#fff1f0", border: "1px solid #f3c5c5", borderRadius: 10, fontSize: 12.5, color: "#b42318", textAlign: "center" }}>
-            {info.offline ? "Backend tidak bisa dihubungi." : "Chat AI belum aktif: isi HERMES_BASE_URL dan HERMES_MODEL di backend/app/.env lalu restart backend."}
+            {info.offline ? "Backend tidak bisa dihubungi." : "Chat AI belum aktif. Hubungi admin untuk mengaktifkannya."}
           </div>
         )}
 
@@ -478,7 +450,7 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
               {SUGGESTIONS.map((s) => (
                 <button key={s} type="button" className="wa-sugg" onClick={() => send(s)} disabled={!!loadingId}
                   style={{
-                    border: "1px solid #d6e2f5", background: "#fff", color: NS.link,
+                    border: "1px solid #d5dbe4", background: "#fff", color: NS.navy,
                     borderRadius: phone || compact ? 12 : 999, textAlign: "left",
                     padding: phone ? "11px 14px" : "7px 12px", fontSize: phone ? 14 : 12.5, fontWeight: 500,
                     cursor: "pointer", fontFamily: NS.font, boxShadow: "0 1px 2px rgba(20,40,77,0.06)",
@@ -549,7 +521,7 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
             width: phone ? 44 : 36, height: phone ? 44 : 36, borderRadius: "50%", border: "none", flexShrink: 0,
             background: input.trim() && !loadingId && !disabled ? WA.teal : "#c3ccd9", color: "#fff",
             display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: input.trim() && !loadingId && !disabled ? "0 2px 6px rgba(42,93,176,0.4)" : "none",
+            boxShadow: input.trim() && !loadingId && !disabled ? "0 2px 6px rgba(20,30,46,0.35)" : "none",
             cursor: input.trim() && !loadingId && !disabled ? "pointer" : "default",
             transition: "background .15s, transform .1s",
           }}>
@@ -572,14 +544,14 @@ export default function NetworkChat({ compact = false, onClose, onAnswer }) {
         @keyframes wa-in { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
         .wa-wall {
           background-color: ${WA.wall};
-          background-image: radial-gradient(rgba(42,93,176,0.07) 1px, transparent 1px);
+          background-image: radial-gradient(rgba(28,42,63,0.07) 1px, transparent 1px);
           background-size: 18px 18px;
         }
         .wa-icon-btn:hover { background: rgba(255,255,255,0.14) !important; }
         .wa-icon-btn:active { background: rgba(255,255,255,0.22) !important; }
-        .wa-sugg:hover { background: #f3f7fd !important; border-color: #b9cdee !important; }
+        .wa-sugg:hover { background: #f5f7fa !important; border-color: #1c2a3f !important; }
         .wa-sugg:active { transform: scale(.98); }
-        .wa-input:focus { border-color: #8fb0e3 !important; box-shadow: 0 0 0 3px rgba(42,93,176,0.12); }
+        .wa-input:focus { border-color: #1c2a3f !important; box-shadow: 0 0 0 3px rgba(217,173,91,0.3); }
         .wa-send:active:not(:disabled) { transform: scale(.92); }
         .wa-row .wa-copy { opacity: 0; transition: opacity .15s; }
         .wa-row:hover .wa-copy { opacity: 1; }

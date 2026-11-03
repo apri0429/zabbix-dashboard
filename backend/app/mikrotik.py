@@ -303,6 +303,8 @@ def _dhcp_active_one_router(router, timeout=None):
                     "status": item.get("status"),
                     "comment": item.get("comment"),
                     "last-seen": item.get("last-seen"),
+                    # Sisa waktu lease (mis. "9m15s"); kosong untuk lease statis.
+                    "expires-after": item.get("expires-after"),
                 })
     finally:
         if conn:
@@ -457,6 +459,8 @@ def _ether_traffic_one_router(router, timeout=None):
                 "limit-at": None,
                 "max-limit": max_bps,
                 "comment": it.get("comment"),
+                # Nama bawaan port (mis. "ether1"), tetap walau port di-rename.
+                "default_name": it.get("default-name") or name,
             }
             iface_id = it.get("id") or it.get(".id") or name
             results.append({

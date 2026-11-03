@@ -7,19 +7,29 @@ const T = {
   navy:      "#24385b",
   navyMid:   "#2a5db0",
   teal:      "#2a9d8f",
-  text:      "#0f2035",
-  textSoft:  "#425575",
-  muted:     "#5a6b88",
-  border:    "rgba(26,42,87,0.10)",
-  borderMid: "rgba(26,42,87,0.18)",
+  text:      "#333333",
+  textSoft:  "#666666",
+  muted:     "#8a8a8a",
+  border:    "#e3e6eb",
+  borderMid: "#cccccc",
   surface:   "#ffffff",
-  surfaceAlt:"rgba(248,249,250,0.95)",
+  surfaceAlt:"#f5f7fa",
 };
 
 // Download vs Upload sengaja dibikin dua warna yang beda jauh (teal vs oranye),
 // bukan dua nuansa navy yang mirip — biar kebedain sekilas tanpa baca label.
-const DL_COLOR = "#2a5db0"; // biru — Download (sama dengan Dashboard)
-const UL_COLOR = "#e08a2e"; // oranye — Upload (sama dengan Dashboard)
+const DL_COLOR = "#1f3d6b"; // navy — Download, senada bar header
+const UL_COLOR = "#b8862e"; // emas tua — Upload, senada aksen emas header
+
+// Port uplink yang ditampilkan per router; port LAN lain disembunyikan.
+// 1 = HO Duta Garden, 2 = Gudang Jatake, 3 = Gudang Ks Tubun, 4 = Gudang Rawa Bokor.
+const UPLINK_PORTS = { 1: [1, 2], 2: [1, 2], 3: [1], 4: [1] };
+// Dicocokkan ke nama bawaan port (default_name), jadi port yang di-rename tetap muncul.
+const isShownPort = (routerId, name = "") => {
+  const ports = UPLINK_PORTS[routerId];
+  const n = /^ether(\d+)(?!\d)/i.exec(name.trim());
+  return !ports || (n != null && ports.includes(Number(n[1])));
+};
 
 // Grafik tren kecil buat tiap baris (mirip sparkline latency di NOC) — biar
 // kelihatan naik-turunnya trafik, bukan cuma angka & bar % dari max limit.
@@ -103,7 +113,8 @@ export default function LiveBandwidth() {
       }
 
       if (seq !== reqSeq.current) return;
-      const rows = Array.isArray(parsed?.data) ? parsed.data : [];
+      const rows = (Array.isArray(parsed?.data) ? parsed.data : [])
+        .filter((it) => isShownPort(it.router_id, it.default_name || it.name.replace(/-(download|upload)$/i, "")));
       setData(rows);
       setOffline(Array.isArray(parsed?.errors) ? parsed.errors : []);
       setLastUpdate(new Date().toLocaleTimeString("en-GB"));
@@ -185,10 +196,13 @@ export default function LiveBandwidth() {
     const groupOrder = [];
 
     data.forEach((item) => {
-      const key = getGroupKey(item.name);
-      if (key) {
+      const portName = getGroupKey(item.name);
+      if (portName) {
+        // Kunci per router + port: nama port yang sama (mis. "ether1-BIZNET")
+        // ada di beberapa router, jangan sampai saling menimpa.
+        const key = `${item.router_id}|${portName}`;
         if (!groups[key]) {
-          groups[key] = { key, download: null, upload: null };
+          groups[key] = { key: portName, download: null, upload: null };
           groupOrder.push(key);
           groupRouter[key] = { name: item.router_name, id: item.router_id };
         }
@@ -213,7 +227,7 @@ export default function LiveBandwidth() {
     groupOrder.forEach((key) => {
       const g = groups[key];
       maybeRouterSep(groupRouter[key]);
-      result.push({ type: "sep", key });
+      result.push({ type: "sep", key: g.key });
       if (g.download) result.push({ type: "row", item: g.download, label: "Download", accent: "dl" });
       if (g.upload)   result.push({ type: "row", item: g.upload,   label: "Upload",   accent: "ul" });
     });
@@ -253,15 +267,20 @@ export default function LiveBandwidth() {
 
   const fmtRate = (v) => (v == null || v === "" || Number.isNaN(Number(v)) ? "–" : (Number(v) / 1_000_000).toFixed(2));
 
-  // Ambang sorotan: ≥100 Mbps oranye, ≥500 Mbps merah.
-  const HIGH_MBPS = 100;
-  const VERY_HIGH_MBPS = 500;
+  // Ambang sorotan dari persen pemakaian kapasitas: ≥70% kuning, ≥90% merah.
+  const WARN_PCT = 70;
+  const BAD_PCT = 90;
+  const WARN_BAR = "#d9622b"; // oranye, beda dari emas Upload
 
-  // Pembanding bar: port tersibuk di tampilan (minimal 10 Mbps supaya port sepi tidak terlihat penuh).
+  // Kapasitas pembanding bar (Mbps): langganan ISP untuk port internet, kalau
+  // tidak ada pakai kecepatan link fisik port, terakhir port tersibuk di tampilan.
   const maxMbps = useMemo(
     () => Math.max(10, ...data.map((d) => (d.rate == null ? 0 : Number(d.rate) / 1_000_000))),
     [data],
   );
+  const capMbps = (item) =>
+    Number(item.isp_mbps) || (Number(item["max-limit"]) ? Number(item["max-limit"]) / 1_000_000 : 0) || maxMbps;
+  const fmtCap = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(1)} Gbps` : `${Math.round(m)} Mbps`);
 
   const visibleSections = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -278,22 +297,30 @@ export default function LiveBandwidth() {
     return [...online, ...down].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
   }, [sections, offline, q, sortBy]);
 
+  // Keterangan port internet, mis. "INDIBIZ · 200 Mbps".
+  const portIsp = (pt) => {
+    const it = pt.rows.find((r) => r.item.isp_mbps)?.item;
+    return it ? `${it.isp_name} · ${fmtCap(Number(it.isp_mbps))}` : null;
+  };
+
   const portCell = (row, trendColor) => {
     if (!row) return <span style={{ color: NS.muted }}>–</span>;
     const key = `${row.item.router_id}|${row.item.name}`;
     const trend = trendMap[key] || [];
     const mbps = row.item.rate == null ? null : Number(row.item.rate) / 1_000_000;
     const peak = peakMap[key];
-    const level = mbps == null ? NS.text : mbps >= VERY_HIGH_MBPS ? NS.bad : mbps >= HIGH_MBPS ? NS.warn : NS.text;
-    const barColor = mbps != null && mbps >= HIGH_MBPS ? level : trendColor;
+    const cap = capMbps(row.item);
+    const pct = mbps == null ? 0 : (mbps / cap) * 100;
+    const level = pct >= BAD_PCT ? NS.bad : pct >= WARN_PCT ? NS.warn : NS.text;
+    const barColor = pct >= BAD_PCT ? NS.bad : pct >= WARN_PCT ? WARN_BAR : trendColor;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ width: 104, flexShrink: 0 }}>
           <div style={{ fontWeight: 700, whiteSpace: "nowrap", color: level }}>
             {fmtRate(row.item.rate)} <span style={{ fontWeight: 500, color: NS.label, fontSize: 11 }}>Mbps</span>
           </div>
-          <div style={{ height: 5, borderRadius: 3, background: NS.colHead, overflow: "hidden", marginTop: 4 }} title={`${Math.round(((mbps || 0) / maxMbps) * 100)}% of busiest port`}>
-            <div style={{ height: "100%", width: `${Math.min(100, ((mbps || 0) / maxMbps) * 100)}%`, background: barColor }} />
+          <div style={{ height: 5, borderRadius: 3, background: NS.colHead, overflow: "hidden", marginTop: 4 }} title={`${Math.round(pct)}% dari ${row.item.isp_mbps ? `kapasitas ${row.item.isp_name}` : "kecepatan link"} ${fmtCap(cap)}`}>
+            <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: barColor }} />
           </div>
         </div>
         <div>
@@ -375,7 +402,7 @@ export default function LiveBandwidth() {
               const single = pt.rows.find((r) => r.label == null);
               const lbl = (t, c) => <div style={{ fontSize: 11, fontWeight: 700, color: c, textTransform: "uppercase", marginBottom: 4 }}>{t}</div>;
               return (
-                <MItem key={pt.name} i={i} title={pt.name}
+                <MItem key={pt.name} i={i} title={pt.name} sub={portIsp(pt)}
                   right={<span style={{ color: NS.label }}>{single ? toBytes(single.item.bytes) : `${dl ? toBytes(dl.item.bytes) : "–"} / ${ul ? toBytes(ul.item.bytes) : "–"}`}</span>}>
                   {single ? portCell(single, NS.navy) : (
                     <div style={{ display: "grid", gap: 10 }}>
@@ -410,7 +437,10 @@ export default function LiveBandwidth() {
                     const bg = i % 2 ? NS.zebra : NS.surface;
                     return (
                       <tr key={pt.name} style={{ background: bg }}>
-                        <td style={{ ...td, fontWeight: 700, verticalAlign: "middle", overflowWrap: "anywhere" }}>{pt.name}</td>
+                        <td style={{ ...td, fontWeight: 700, verticalAlign: "middle", overflowWrap: "anywhere" }}>
+                          {pt.name}
+                          {portIsp(pt) && <div style={{ fontSize: 11, fontWeight: 600, color: NS.label, marginTop: 2 }}>{portIsp(pt)}</div>}
+                        </td>
                         {single ? (
                           <td style={{ ...td, verticalAlign: "middle" }} colSpan={2}>{portCell(single, NS.navy)}</td>
                         ) : (

@@ -9,7 +9,7 @@ import {
   Download04, Globe05, SearchMd, Send01,
 } from "@untitledui/icons";
 import { API_BASE } from "../api";
-import { NS, PageHeader, Kpi, BandTitle, btn } from "../components/ns";
+import { NS, PageHeader, Kpi, BandTitle, btn, btnClass } from "../components/ns";
 
 /* ─── Palet warna ───
    LIGHT dipakai saat NOC ditempel di dashboard biasa. WALL dipakai khusus mode
@@ -19,37 +19,37 @@ function buildPalette(dark) {
     return {
       dark: false,
       navy: "#24385b", navyMid: "#2a5db0", teal: "#2a9d8f", coral: "#e76f51",
-      text: "#0f2035", textSoft: "#425575", muted: "#5a6b88",
-      border: "rgba(26,42,87,0.10)", borderStrong: "rgba(26,42,87,0.13)",
-      surface: "#ffffff", surfaceAlt: "rgba(248,249,250,0.95)",
+      text: "#333333", textSoft: "#666666", muted: "#8a8a8a",
+      border: "#e3e6eb", borderStrong: "#d5dbe4",
+      surface: "#ffffff", surfaceAlt: "#f5f7fa",
       panelBg: null, pageBg: "transparent", mutedAccent: "#c7ceda",
-      UP: "#18786e", WARN: "#8a680f", DOWN: "#b42318", UNKNOWN: "#5a6b88",
+      UP: "#18786e", WARN: "#8a680f", DOWN: "#b42318", UNKNOWN: "#8a8a8a",
       dotGlow: (c) => `0 0 0 3px ${c}22`,
       STATE_META: {
         UP:      { color: "#18786e", bg: "rgba(42,157,143,0.14)",  label: "UP" },
         WARN:    { color: "#8a680f", bg: "rgba(233,196,106,0.20)", label: "WARNING" },
         DOWN:    { color: "#b42318", bg: "rgba(231,111,81,0.14)",  label: "DOWN" },
-        UNKNOWN: { color: "#5a6b88", bg: "rgba(26,42,87,0.06)",    label: "NO DATA" },
+        UNKNOWN: { color: "#8a8a8a", bg: "rgba(0,0,0,0.05)",    label: "NO DATA" },
       },
       CARD_TONE: {
         UP:      { wash: "rgba(42,157,143,0.06)",  border: "rgba(24,120,110,0.30)" },
         WARN:    { wash: "rgba(233,196,106,0.12)", border: "rgba(138,104,15,0.32)" },
         DOWN:    { wash: "rgba(231,111,81,0.08)",  border: "rgba(180,35,24,0.32)" },
-        UNKNOWN: { wash: "rgba(26,42,87,0.035)",   border: "rgba(26,42,87,0.16)"  },
+        UNKNOWN: { wash: "rgba(0,0,0,0.025)",   border: "#cccccc"  },
       },
     };
   }
   return {
     dark: false,
     navy: "#214c9a", navyMid: "#3f6fc9", teal: "#0f9f8f", coral: "#f26b4f",
-    text: "#10233f", textSoft: "#405878", muted: "#687a95",
-    border: "rgba(33,76,154,0.12)", borderStrong: "rgba(33,76,154,0.18)",
-    surface: "#ffffff", surfaceAlt: "#f7faff",
-    panelBg: "rgba(255,255,255,0.94)",
+    text: "#333333", textSoft: "#666666", muted: "#8a8a8a",
+    border: "#e3e6eb", borderStrong: "#d5dbe4",
+    surface: "#ffffff", surfaceAlt: "#f5f7fa",
+    panelBg: "#ffffff",
     pageBg: "#f6f7f9",
     mutedAccent: "#d9e4f4",
     UP: "#0b8f70", WARN: "#b77905", DOWN: "#d92d20", UNKNOWN: "#667085",
-    dotGlow: (c) => `0 0 0 4px ${c}20, 0 8px 18px -10px ${c}`,
+    dotGlow: (c) => `0 0 0 3px ${c}22`,
     STATE_META: {
       UP:      { color: "#0b8f70", bg: "rgba(15,159,143,0.13)", label: "UP" },
       WARN:    { color: "#b77905", bg: "rgba(247,181,0,0.16)",  label: "WARNING" },
@@ -359,8 +359,8 @@ const SiteCard = ({ s, idx = 0, pal, trend = [] }) => {
       </div>
       {(s.vpn_measured || s.is_standby) && (
         <div style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: pal.muted, marginTop: -2, justifyContent: "flex-end" }}>
-          {s.vpn_measured && <span style={{ border: `1px solid ${pal.border}`, borderRadius: 4, padding: "0 4px" }}>VPN</span>}
-          {s.is_standby && <span style={{ color: pal.UP, border: `1px solid ${pal.UP}55`, borderRadius: 4, padding: "0 4px" }}>CADANGAN</span>}
+          {s.vpn_measured && <span style={{ border: `1px solid ${pal.border}`, borderRadius: 3, padding: "0 4px" }}>VPN</span>}
+          {s.is_standby && <span style={{ color: pal.UP, border: `1px solid ${pal.UP}55`, borderRadius: 3, padding: "0 4px" }}>CADANGAN</span>}
         </div>
       )}
     </div>
@@ -855,10 +855,10 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
           ? <span style={{ color: NS.bad }}>Backend disconnected · last data {lastOk ? lastOk.format("HH:mm:ss") : "-"}</span>
           : `${counts.up}/${counts.total} connections normal · ${dc.up}/${dc.total} devices online · ${data?.problem_count ?? 0} alerts · updated ${data?.generated_at?.slice(11, 16) || "—"}`}
         actions={<>
-          <button onClick={() => setShowStats(true)} style={btn(false)} title="Uptime % & MTTR 7 hari">
+          <button onClick={() => setShowStats(true)} className={btnClass(false)} style={btn(false)} title="Uptime % & MTTR 7 hari">
             <BarChartSquare02 width={14} height={14} /> Keandalan
           </button>
-          <button onClick={openReport} style={btn(true)} title="Buat & kirim rekap NOC mingguan sekarang">
+          <button onClick={openReport} className={btnClass(true)} style={btn(true)} title="Buat & kirim rekap NOC mingguan sekarang">
             <Send01 width={14} height={14} /> Laporan Mingguan
           </button>
         </>}
@@ -875,12 +875,12 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
             right={(
               <div style={{ display: "flex", gap: 6 }}>
                 {!isFs && (
-                  <button onClick={() => setShowHistory(true)} style={{ ...riwayatBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Lihat seluruh riwayat insiden yang tercatat">
+                  <button onClick={() => setShowHistory(true)} className="ns-btn" style={{ ...riwayatBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Lihat seluruh riwayat insiden yang tercatat">
                     <Clipboard width={13} height={13} /> Detail Riwayat
                   </button>
                 )}
                 {incidents.length > 0 && (
-                  <button onClick={exportIncidents} style={{ ...excelBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Export log insiden ke Excel">
+                  <button onClick={exportIncidents} className="ns-btn" style={{ ...excelBtnStyle, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", fontSize: 11 }} title="Export log insiden ke Excel">
                     <Download04 width={13} height={13} /> Excel
                   </button>
                 )}
@@ -936,7 +936,7 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
                     <span style={{
                       flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3,
                       fontSize: 9, fontWeight: 800, letterSpacing: "0.04em",
-                      padding: "2px 7px", borderRadius: 4, whiteSpace: "nowrap", marginTop: 1,
+                      padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap", marginTop: 1,
                       color: pal.WARN, background: `${pal.WARN}1f`,
                     }}>BLACKOUT</span>
                   </div>
@@ -968,7 +968,7 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
                     <span style={{
                       flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3,
                       fontSize: 9, fontWeight: 800, letterSpacing: "0.04em",
-                      padding: "2px 7px 2px 5px", borderRadius: 4, whiteSpace: "nowrap", marginTop: 1,
+                      padding: "2px 7px 2px 5px", borderRadius: 3, whiteSpace: "nowrap", marginTop: 1,
                       color: x.ongoing ? pal.DOWN : pal.UP,
                       background: x.ongoing ? pal.STATE_META.DOWN.bg : pal.STATE_META.UP.bg,
                     }}>
@@ -1468,12 +1468,12 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
                           <span style={{ fontSize: 13, fontWeight: 800, color: LIGHT.text, overflowWrap: "anywhere" }}>
                             {shortLabel(r.name)}
-                            {r.ongoing && <span style={{ fontSize: 9.5, fontWeight: 800, color: LIGHT.DOWN, background: LIGHT.STATE_META.DOWN.bg, borderRadius: 4, padding: "1px 5px", marginLeft: 6 }}>SEDANG DOWN</span>}
+                            {r.ongoing && <span style={{ fontSize: 9.5, fontWeight: 800, color: LIGHT.DOWN, background: LIGHT.STATE_META.DOWN.bg, borderRadius: 3, padding: "1px 5px", marginLeft: 6 }}>SEDANG DOWN</span>}
                           </span>
                           <span style={{ fontSize: 15, fontWeight: 800, color: c, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>{p == null ? "–" : `${p}%`}</span>
                         </div>
-                        <div style={{ height: 6, borderRadius: 4, background: `${c}1f`, marginTop: 7, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, p ?? 100))}%`, background: c, borderRadius: 4 }} />
+                        <div style={{ height: 6, borderRadius: 3, background: `${c}1f`, marginTop: 7, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, p ?? 100))}%`, background: c, borderRadius: 3 }} />
                         </div>
                         <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 10.5, color: LIGHT.textSoft, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", flexWrap: "wrap" }}>
                           <span><b style={{ color: LIGHT.text }}>{r.incidents}</b> insiden</span>
@@ -1595,35 +1595,34 @@ export default function NocView({ mode = "full", reportSignal = 0 }) {
         .noc-wall .dashboard-panel { box-shadow: none; border: 1px solid ${pal.borderStrong}; animation: noc-fade-up .42s ease both; }
         .noc-card { animation: noc-fade-up .4s ease both; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
         .noc-logrow { animation: noc-fade-up .3s ease both; transition: box-shadow .14s ease; }
-        .noc-logrow:hover { box-shadow: inset 0 0 0 999px rgba(33,76,154,0.04); }
-        .noc-card:hover { transform: translateY(-2px); border-color: rgba(33,76,154,0.28); box-shadow: 0 14px 28px -24px rgba(16,35,63,0.55); }
-        .noc-counter { box-shadow: 0 14px 30px -28px rgba(16,35,63,0.50); }
-        .noc-fs .noc-counter { background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,251,255,0.94)); border-color: rgba(33,76,154,0.18); }
+        .noc-logrow:hover { box-shadow: inset 0 0 0 999px rgba(37,85,153,0.05); }
+        .noc-card:hover { border-color: #b9c6da; }
+        .noc-counter { box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        .noc-fs .noc-counter { background: #ffffff; border-color: #d5dbe4; }
         .noc-alarm { animation: noc-fade-up .4s ease both, noc-alarm-ring 1.8s ease-in-out infinite .4s; }
         .noc-pop { animation: noc-pop .38s cubic-bezier(.2,.75,.3,1) both; }
 
         .noc-loadbar { position: absolute; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; z-index: 30; border-radius: 3px; }
-        .noc-loadbar > i { position: absolute; top: 0; height: 100%; background: linear-gradient(90deg, ${pal.navy}, ${pal.teal}); animation: noc-bar 1.1s ease-in-out infinite; }
+        .noc-loadbar > i { position: absolute; top: 0; height: 100%; background: ${pal.navyMid}; animation: noc-bar 1.1s ease-in-out infinite; }
 
-        .noc-scroll { scrollbar-width: thin; scrollbar-color: rgba(33,76,154,0.22) transparent; scrollbar-gutter: stable; }
+        .noc-scroll { scrollbar-width: thin; scrollbar-color: #c4c9d1 transparent; scrollbar-gutter: stable; }
         .noc-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-        .noc-scroll::-webkit-scrollbar-thumb { background: rgba(33,76,154,0.22); border-radius: 3px; }
-        .noc-scroll::-webkit-scrollbar-thumb:hover { background: rgba(33,76,154,0.36); }
+        .noc-scroll::-webkit-scrollbar-thumb { background: #c4c9d1; border-radius: 3px; }
+        .noc-scroll::-webkit-scrollbar-thumb:hover { background: #a8afba; }
         .noc-scroll::-webkit-scrollbar-track { background: transparent; }
 
         .noc-fs { color-scheme: light; }
         .noc-fs .dashboard-panel {
-          box-shadow: 0 20px 50px -34px rgba(16,35,63,0.45);
+          box-shadow: 0 1px 2px rgba(0,0,0,0.08);
           border: 1px solid ${WALL.borderStrong};
           border-radius: 3px;
           background: ${WALL.panelBg};
-          backdrop-filter: blur(10px);
           color: ${WALL.text};
         }
         .noc-fs .noc-head {
-          background: linear-gradient(90deg, rgba(255,255,255,0.98), rgba(247,251,255,0.94));
-          border-color: rgba(33,76,154,0.20);
-          box-shadow: 0 18px 44px -34px rgba(33,76,154,0.55);
+          background: #ffffff;
+          border-color: #d5dbe4;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.08);
         }
         .noc-wall:fullscreen { overflow: hidden; }
 

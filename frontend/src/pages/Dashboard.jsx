@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import dayjs from "dayjs";
 import Overview from "../components/Overview";
 import NocView from "./NocView";
-import { NS, PageHeader, btn } from "../components/ns";
+import { NS, PageHeader, AlertButton, btn, btnClass } from "../components/ns";
 
 const fmtTanggal = (d) => d.format("dddd, D MMMM YYYY");
 
@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [clock, setClock] = useState(() => dayjs());
   // Naik tiap tombol "Laporan Mingguan" diklik; NocView membuka jendela laporannya.
   const [reportSignal, setReportSignal] = useState(0);
+  const [alerts, setAlerts] = useState(null);
 
   useEffect(() => {
     const t = setInterval(() => setClock(dayjs()), 1000);
@@ -23,14 +24,15 @@ export default function Dashboard() {
       <PageHeader
         title="Dashboard"
         subtitle={`Network health overview for PT Pilar Niaga Makmur · ${fmtTanggal(clock)}, ${clock.format("HH:mm:ss")}`}
-        actions={
-          <button type="button" onClick={() => setReportSignal((n) => n + 1)} style={btn(true)}>
+        actions={<>
+          <AlertButton items={alerts} />
+          <button type="button" onClick={() => setReportSignal((n) => n + 1)} className={btnClass(true)} style={btn(true)}>
             Weekly Report
           </button>
-        }
+        </>}
       />
 
-      <Overview />
+      <Overview onAlerts={setAlerts} />
 
       <NocView mode="devices" reportSignal={reportSignal} />
     </div>

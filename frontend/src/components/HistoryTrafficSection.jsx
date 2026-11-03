@@ -18,20 +18,20 @@ import { NS, Band, fieldStyle } from "./ns";
 // ─── Design Tokens ───────────────────────────────────────────────────────────
 const C = {
   surface:       "#ffffff",
-  bg:            "#f0f4f9",
+  bg:            "#f5f7fa",
   accent:        "#24385b",
   accentLight:   "#2a5db0",
-  green:         "#2a5db0",
+  green:         "#1f3d6b",   // download: navy header
   greenBg:       "rgba(0,200,117,0.08)",
   greenBorder:   "rgba(0,200,117,0.22)",
-  orange:        "#e08a2e",
+  orange:        "#b8862e",   // upload: emas tua header
   orangeBg:      "rgba(245,158,11,0.08)",
   orangeBorder:  "rgba(245,158,11,0.22)",
-  border:        "rgba(35,57,113,0.09)",
-  borderMid:     "rgba(35,57,113,0.16)",
-  textPrimary:   "#0d1f3c",
-  textSecondary: "#3d5278",
-  textMuted:     "#7a90b0",
+  border:        "#e3e6eb",
+  borderMid:     "#cccccc",
+  textPrimary:   "#333333",
+  textSecondary: "#666666",
+  textMuted:     "#8a8a8a",
   textHint:      "#8a8a8a",
 };
 
@@ -154,8 +154,8 @@ const RouterChip = ({ host, index, isActive, avgDl, onSelect, color = C.accent }
         width: "100%", textAlign: "left",
         padding: "8px 10px",
         borderRadius: 3,
-        border: `1px solid ${isActive ? color : "rgba(35,57,113,0.12)"}`,
-        background: isActive ? `${color}12` : "rgba(35,57,113,0.03)",
+        border: `1px solid ${isActive ? color : "#cccccc"}`,
+        background: isActive ? `${color}12` : "#f5f7fa",
         cursor: "pointer",
         transition: "all 0.16s ease",
         WebkitTapHighlightColor: "transparent",

@@ -13,10 +13,13 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { CheckCircle, AlertTriangle, XCircle, Server04 } from "@untitledui/icons";
+import { CheckCircle, AlertTriangle, XCircle, Server04, Calendar } from "@untitledui/icons";
 import HistoryTrafficSection from "../components/HistoryTrafficSection";
 import { API_BASE } from "../api";
-import { NS, PageHeader, Panel, Alert, Kpi, btn, fieldStyle, th, td, zebraRow } from "../components/ns";
+import {
+  NS, PageHeader, Panel, Alert, Kpi, btn, btnClass, fieldStyle, zebraRow,
+  listPanel, listTd as td, SortTh, FilterBar,
+} from "../components/ns";
 
 const HARI = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
 const BULAN = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
@@ -31,18 +34,19 @@ const T = {
   gold:     "#e9c46a",
   coral:    "#e76f51",
   purple:   "#9d4edd",
-  text:     "#0f2035",
-  textSoft: "#425575",
-  muted:    "#5a6b88",
-  border:   "rgba(26,42,87,0.10)",
-  borderMid:"rgba(26,42,87,0.18)",
+  text:     "#333333",
+  textSoft: "#666666",
+  muted:    "#8a8a8a",
+  border:   "#e3e6eb",
+  borderMid:"#cccccc",
   surface:  "#ffffff",
-  surfaceAlt:"rgba(248,249,250,0.95)",
-  shadow:   "0 18px 36px rgba(17,38,75,0.08)",
+  surfaceAlt:"#f5f7fa",
+  shadow:   "0 1px 2px rgba(0,0,0,0.08)",
 };
 
-const DL = "#2a5db0", DL_LIGHT = "#9db8e6", UL = "#e08a2e", UL_LIGHT = "#f3c58e";
-const PIE_COLORS = ["#2a5db0", "#e08a2e", "#3a9d6e", "#7b61c4", "#d0574a", "#2a9fb5", "#c9a227", "#8c8c8c"];
+// Warna senada header (sama dengan Live Bandwidth): navy = download, emas tua = upload.
+const DL = "#1f3d6b", DL_LIGHT = "#93a6c4", UL = "#b8862e", UL_LIGHT = "#e2c88f";
+const PIE_COLORS = ["#1f3d6b", "#b8862e", "#3a7d5c", "#6b5b95", "#b5523b", "#2f7f95", "#8c8c8c", "#d9ad5b"];
 
 const STATUS = {
   STABIL: { color:NS.ok,   bg:NS.okBg,   border:NS.okBg,   label:"Stabil" },
@@ -113,7 +117,7 @@ const StatTile = ({ label, value, color, Icon }) => (
 );
 
 const ProgressBar = ({ value, color }) => (
-  <div style={{ height: 5, borderRadius: 3, background: "rgba(26,42,87,0.08)", overflow: "hidden" }}>
+  <div style={{ height: 5, borderRadius: 3, background: "#e5e5e5", overflow: "hidden" }}>
     <div style={{ height: "100%", width: `${Math.min(value, 100)}%`, background: color, borderRadius: 3, transition: "width 0.5s ease" }} />
   </div>
 );
@@ -164,7 +168,7 @@ const TrafficChart = ({ rows = [], isMobile }) => {
   })), [rows]);
 
   if (!data.length) return (
-    <div style={{ height:220, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12, borderRadius:3, background:"rgba(26,42,87,0.03)", border:`1px dashed ${T.border}` }}>
+    <div style={{ height:220, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12, borderRadius:3, background:"#f5f7fa", border:`1px dashed ${T.border}` }}>
       <p style={{ color:T.muted, fontSize:13, margin:0 }}>Generate report untuk melihat chart trafik.</p>
     </div>
   );
@@ -187,7 +191,7 @@ const TrafficChart = ({ rows = [], isMobile }) => {
               <CartesianGrid stroke="#ececec" vertical={false} />
               <XAxis dataKey="name" tick={{ fill:T.muted, fontSize:isMobile?9.5:10 }} axisLine={false} tickLine={false} angle={-28} textAnchor="end" height={isMobile?68:70} interval={0} />
               <YAxis tick={{ fill:T.muted, fontSize:isMobile?9:10 }} axisLine={false} tickLine={false} width={isMobile?40:56} tickFormatter={(v) => `${v}M`} />
-              <Tooltip content={<ChartTooltip />} cursor={{ fill:"rgba(42,93,176,0.06)" }} />
+              <Tooltip content={<ChartTooltip />} cursor={{ fill:"rgba(28,42,63,0.06)" }} />
               {bars.map(b => <Bar key={b.key} dataKey={b.key} fill={b.color} radius={[2,2,0,0]} opacity={b.opacity ?? 1} legendType="none" />)}
             </BarChart>
           </ResponsiveContainer>
@@ -234,9 +238,9 @@ const DonutChart = ({ rows = [] }) => {
           return (
             <button key={t.key} type="button" onClick={() => setActiveTab(t.key)} style={{
               height:30, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit",
-              border:`1px solid ${on ? NS.primary : NS.field}`, marginLeft: i ? -1 : 0, position:"relative", zIndex: on ? 1 : 0,
+              border:`1px solid ${on ? NS.navy : NS.field}`, marginLeft: i ? -1 : 0, position:"relative", zIndex: on ? 1 : 0,
               borderRadius: i === 0 ? "3px 0 0 3px" : i === tabs.length - 1 ? "0 3px 3px 0" : 0,
-              background: on ? NS.hover : NS.surface, color: on ? NS.primary : NS.text,
+              background: on ? NS.navy : NS.surface, color: on ? "#fff" : NS.text,
             }}>{t.label}</button>
           );
         })}
@@ -298,10 +302,10 @@ const SummaryCard = ({ r }) => {
       {/* metrics grid */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
         {[
-          { label:"Avg DL",  value: mbps(r.avg_download),  color:"#2a9d8f" },
-          { label:"Avg UL",  value: mbps(r.avg_upload),    color:"#e76f51" },
-          { label:"Peak DL", value: mbps(r.peak_download), color:"#2a5db0" },
-          { label:"Peak UL", value: mbps(r.peak_upload),   color:"#e9c46a" },
+          { label:"Avg DL",  value: mbps(r.avg_download),  color:DL },
+          { label:"Avg UL",  value: mbps(r.avg_upload),    color:UL },
+          { label:"Peak DL", value: mbps(r.peak_download), color:DL },
+          { label:"Peak UL", value: mbps(r.peak_upload),   color:UL },
         ].map((m, i) => (
           <div key={m.label} style={{
             padding:"9px 14px",
@@ -316,7 +320,7 @@ const SummaryCard = ({ r }) => {
       {/* score bar */}
       <div style={{ padding:"9px 14px 11px", borderTop:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 }}>
         <span style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.06em", flexShrink:0 }}>Score</span>
-        <div style={{ flex:1, height:5, borderRadius:3, background:"rgba(26,42,87,0.07)", overflow:"hidden" }}>
+        <div style={{ flex:1, height:5, borderRadius:3, background:"#e5e5e5", overflow:"hidden" }}>
           <div style={{ height:"100%", width:`${Math.min(score,100)}%`, background:s.color, borderRadius:3, transition:"width 0.5s ease" }} />
         </div>
         <span style={{ fontSize:12, fontWeight:700, color:s.color, fontFamily:"'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif", flexShrink:0 }}>{score}%</span>
@@ -326,15 +330,27 @@ const SummaryCard = ({ r }) => {
 };
 
 /* ─── Summary Table ─── */
-const SummaryTable = ({ rows = [] }) => {
+const SummaryTable = ({ rows: rawRows = [] }) => {
   const [hover, setHover] = useState(null);
+  const [sort, setSort] = useState({ key: null, dir: 1 });
+  // Klik kepala kolom: naik -> turun -> urutan asli.
+  const toggleSort = (key) =>
+    setSort((s) => (s.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : { key: null, dir: 1 }));
+  const rows = useMemo(() => {
+    if (!sort.key) return rawRows;
+    const val = (r) => (sort.key === "label" ? shortLabel(r.label).toLowerCase() : parseFloat(r[sort.key]) || 0);
+    return [...rawRows].sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sort.dir);
+  }, [rawRows, sort]);
   if (!rows.length) return (
     <div style={{ padding:"24px 12px", textAlign:"center", color:NS.label, fontSize:13 }}>
       Generate report untuk melihat ringkasan trafik per host.
     </div>
   );
 
-  const heads = ["Host / ISP", "Kapasitas", "Avg DL", "Avg UL", "Peak DL", "Peak UL", "Score", "Status"];
+  const heads = [
+    ["Host / ISP", "label"], ["Kapasitas", "capacity"], ["Avg DL", "avg_download"], ["Avg UL", "avg_upload"],
+    ["Peak DL", "peak_download"], ["Peak UL", "peak_upload"], ["Score", "weighted_score"], ["Status", null],
+  ];
   const numCols = ["avg_download", "avg_upload", "peak_download", "peak_upload"];
   const tag = (text, color, title) => (
     <span title={title} style={{ fontSize:10, fontWeight:700, color, background:NS.zebra, borderRadius:3, padding:"1px 5px" }}>{text}</span>
@@ -345,7 +361,11 @@ const SummaryTable = ({ rows = [] }) => {
       <table style={{ width:"100%", minWidth:840, borderCollapse:"collapse" }}>
         <thead>
           <tr>
-            {heads.map((h, i) => <th key={h} style={{ ...th, textAlign: i === 0 || i === 7 ? "left" : "right" }}>{h}</th>)}
+            {heads.map(([h, key], i) => (
+              <SortTh key={h} label={h} active={sort.key === key && key != null} dir={sort.dir}
+                onClick={key ? () => toggleSort(key) : undefined}
+                style={{ textAlign: i === 0 || i === 7 ? "left" : "right" }} />
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -394,7 +414,7 @@ const BreakdownGrid = ({ items = [] }) => {
       <div style={{ overflowX:"auto" }}>
         <table style={{ width:"100%", minWidth:900, borderCollapse:"collapse" }}>
           <thead>
-            <tr>{heads.map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>{heads.map((h) => <SortTh key={h} label={h} />)}</tr>
           </thead>
           <tbody>
             {items.map((item, i) => {
@@ -437,7 +457,7 @@ const BreakdownGrid = ({ items = [] }) => {
 /* ─── Button ─── */
 const Btn = ({ children, onClick, disabled, variant, fullWidth }) => (
   <button type="button" onClick={onClick} disabled={disabled}
-    style={{ ...btn(variant === "primary", disabled), width: fullWidth ? "100%" : "auto" }}>
+    className={btnClass(variant === "primary")} style={{ ...btn(variant === "primary", disabled), width: fullWidth ? "100%" : "auto" }}>
     {children}
   </button>
 );
@@ -448,16 +468,23 @@ const DateInput = ({ label, value, onChange, min, max }) => {
   return (
     <label style={{ display:"flex", flexDirection:"column", gap:4, flex:1, minWidth:0 }}>
       <span style={{ fontSize:11, fontWeight:700, color:NS.label, textTransform:"uppercase", letterSpacing:"0.03em" }}>{label}</span>
-      <input
-        ref={inputRef}
-        type="datetime-local"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => onChange(e.target.value)}
-        onClick={() => inputRef.current?.showPicker?.()}
-        style={{ ...fieldStyle, colorScheme:"light" }}
-      />
+      {/* Ikon kalender digambar sendiri (ikon bawaan browser sering hilang di HP);
+          indikator bawaan dibuat transparan & menutupi seluruh kotak supaya
+          sentuhan di mana pun membuka pemilih tanggal. */}
+      <span className="ns-dateinput" style={{ position:"relative", display:"block" }}>
+        <input
+          ref={inputRef}
+          type="datetime-local"
+          value={value}
+          min={min}
+          max={max}
+          onChange={(e) => onChange(e.target.value)}
+          onClick={() => inputRef.current?.showPicker?.()}
+          style={{ ...fieldStyle, colorScheme:"light", paddingRight:34 }}
+        />
+        <Calendar width={16} height={16} aria-hidden="true"
+          style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", color:NS.label, pointerEvents:"none" }} />
+      </span>
     </label>
   );
 };
@@ -498,6 +525,7 @@ export default function TrafficReport() {
   const [error, setError]         = useState("");
   const [report, setReport]       = useState(null);
   const [clock, setClock]         = useState(() => dayjs());
+  const [showPeriod, setShowPeriod] = useState(true);
 
   useEffect(() => {
     const t = setInterval(() => setClock(dayjs()), 1000);
@@ -571,16 +599,22 @@ export default function TrafficReport() {
         </>}
       />
 
-      <Panel title="Periode Laporan" pad={12}
-        right={dataRange ? `Data tersedia: ${dayjs(dataRange.min).format("DD MMM YYYY HH:mm")} – ${dayjs(dataRange.max).format("DD MMM YYYY HH:mm")}` : null}>
-        <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr auto", gap:12, alignItems:"end" }}>
-          <DateInput label="Mulai" value={startDate} onChange={setStartDate} min={minDate} max={endDate} />
-          <DateInput label="Selesai" value={endDate} onChange={setEndDate} min={startDate} max={maxDate} />
-          <Btn variant="primary" onClick={handleGenerate} disabled={loading} fullWidth={isMobile}>
-            {loading ? "Memuat…" : "Generate Report"}
-          </Btn>
-        </div>
-      </Panel>
+      <div style={listPanel}>
+        <FilterBar open={showPeriod} onToggle={() => setShowPeriod((v) => !v)} title="PERIODE LAPORAN">
+          <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,240px) minmax(0,240px) auto", gap:12, alignItems:"end", justifyContent:"start", width:"100%" }}>
+            <DateInput label="Mulai" value={startDate} onChange={setStartDate} min={minDate} max={endDate} />
+            <DateInput label="Selesai" value={endDate} onChange={setEndDate} min={startDate} max={maxDate} />
+            <Btn variant="primary" onClick={handleGenerate} disabled={loading} fullWidth={isMobile}>
+              {loading ? "Memuat…" : "Generate Report"}
+            </Btn>
+          </div>
+          {dataRange && (
+            <div style={{ width:"100%", fontSize:11.5, color:NS.label }}>
+              Data tersedia: {dayjs(dataRange.min).format("DD MMM YYYY HH:mm")} – {dayjs(dataRange.max).format("DD MMM YYYY HH:mm")}
+            </div>
+          )}
+        </FilterBar>
+      </div>
 
       {error && <Alert tone="bad" title="Terjadi kesalahan">{error}</Alert>}
 

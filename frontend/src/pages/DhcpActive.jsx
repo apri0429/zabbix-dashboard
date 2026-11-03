@@ -1,59 +1,49 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Users01, Wifi, MarkerPin05 } from "@untitledui/icons";
 import { buildApiUrl } from "../api";
-import { NS, PageHeader, Panel, Alert, Field, MItem, MFacts, btn, fieldStyle, th, td, zebraRow } from "../components/ns";
-
-const T = {
-  navy:      "#24385b",
-  navyMid:   "#2a5db0",
-  teal:      "#2a9d8f",
-  text:      "#0f2035",
-  textSoft:  "#425575",
-  muted:     "#5a6b88",
-  border:    "rgba(26,42,87,0.10)",
-  borderMid: "rgba(26,42,87,0.18)",
-  surface:   "#ffffff",
-  surfaceAlt:"rgba(248,249,250,0.95)",
-};
+import {
+  NS, PageHeader, Alert, AlertButton, MItem, MFacts, fieldStyle, zebraRow,
+  NS_SHADOW, listPanel, listTd as baseTd, FilterBar, FilterField, SortTh, ListFooter,
+} from "../components/ns";
 
 const Dot = ({ color, size = 6 }) => (
   <span style={{ width: size, height: size, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
 );
 
-/* Warna khas per router (sama pendekatan kayak siteColor di NOC) — tiap router
-   dijatah warna berikutnya dari palet secara berurutan, biar gak ada dua router
-   yang kebagian warna sama. */
-const SITE_PALETTE = ["#2a5db0"]; // satu warna netral, seragam dengan halaman lain
-const _siteColorAssigned = new Map();
-function siteColor(name) {
-  const key = String(name || "");
-  let color = _siteColorAssigned.get(key);
-  if (!color) {
-    color = SITE_PALETTE[_siteColorAssigned.size % SITE_PALETTE.length];
-    _siteColorAssigned.set(key, color);
-  }
-  return color;
+/* Sisa lease dari RouterOS ("1d2h3m4s", "9m15s", atau "01:02:03") -> detik. */
+function leaseSeconds(v) {
+  if (!v) return null;
+  const t = String(v).trim();
+  const hms = /^(?:(\d+)d)?(\d+):(\d+):(\d+)$/.exec(t);
+  if (hms) return (+hms[1] || 0) * 86400 + +hms[2] * 3600 + +hms[3] * 60 + +hms[4];
+  const re = /(\d+)([wdhms])/g;
+  const unit = { w: 604800, d: 86400, h: 3600, m: 60, s: 1 };
+  let total = 0, m, found = false;
+  while ((m = re.exec(t))) { total += +m[1] * unit[m[2]]; found = true; }
+  return found ? total : null;
 }
 
-const Counter = ({ label, value, color, Icon }) => (
-  <div style={{
-    background: T.surface, border: `1px solid ${T.borderMid}`, borderRadius: 3,
-    padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, minWidth: 0,
-  }}>
-    {Icon && (
-      <span style={{
-        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-        width: 34, height: 34, borderRadius: 3, background: `${color}1c`, color,
-      }}>
-        <Icon width={17} height={17} />
-      </span>
-    )}
-    <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", color: T.muted, textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.15, fontFamily: "'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" }}>{value}</div>
-    </div>
-  </div>
-);
+function leaseText(v) {
+  const sec = leaseSeconds(v);
+  if (sec == null) return "–";
+  if (sec <= 0) return "Expired";
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return h ? `${d} hari ${h} jam` : `${d} hari`;
+  if (h) return m ? `${h} jam ${m} mnt` : `${h} jam`;
+  if (m) return `${m} mnt`;
+  return `${sec} dtk`;
+}
+
+/* Kolom daftar: label header + cara ambil nilai untuk diurutkan. */
+const COLUMNS = [
+  { key: "router_name", label: "Router" },
+  { key: "address",     label: "IP Address", get: (r) => (r.address || "").split(".").map((n) => n.padStart(3, "0")).join(".") },
+  { key: "mac-address", label: "MAC Address" },
+  { key: "host-name",   label: "Hostname" },
+  { key: "expires-after", label: "Expired", get: (r) => leaseSeconds(r["expires-after"]) ?? Infinity },
+  { key: "status",      label: "Status", sortable: false },
+];
+
+const listTd = { ...baseTd, whiteSpace: "nowrap" };
 
 export default function DhcpActive() {
   const [data, setData]               = useState([]);
@@ -62,7 +52,7 @@ export default function DhcpActive() {
   const [error, setError]             = useState("");
   const [routerId, setRouterId]       = useState("all");
   const [searchTerm, setSearchTerm]   = useState("");
-  const [rowsPerPage, setRowsPerPage] = useState("10");
+  const [rowsPerPage, setRowsPerPage] = useState("25");
   const [currentPage, setCurrentPage] = useState(1);
   const [lastUpdate, setLastUpdate]   = useState("");
   const [isMobile, setIsMobile]       = useState(() => window.innerWidth <= 640);
@@ -138,28 +128,31 @@ export default function DhcpActive() {
     return () => clearInterval(id);
   }, [routerId]);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, routerId, rowsPerPage]);
+  const [sort, setSort] = useState({ key: null, dir: 1 });
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, routerId, rowsPerPage, sort]);
 
   const filteredData = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
-    if (!keyword) return data;
-    return data.filter((item) =>
-      [item.router_name, item.address, item["mac-address"], item["host-name"], item.server, item.status]
+    const rows = !keyword ? data : data.filter((item) =>
+      [item.router_name, item.address, item["mac-address"], item["host-name"], item.status]
         .some((v) => String(v || "").toLowerCase().includes(keyword))
     );
-  }, [data, searchTerm]);
+    const col = COLUMNS.find((c) => c.key === sort.key);
+    if (!col) return rows;
+    const val = col.get || ((r) => String(r[col.key] || "").toLowerCase());
+    return [...rows].sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sort.dir);
+  }, [data, searchTerm, sort]);
 
-  const totalPages =
-    rowsPerPage === "all" ? 1 : Math.max(1, Math.ceil(filteredData.length / Number(rowsPerPage)));
+  // Klik kepala kolom: urut naik -> turun -> kembali ke urutan asli.
+  const toggleSort = (key) =>
+    setSort((s) => (s.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : { key: null, dir: 1 }));
 
   const displayedData = useMemo(() => {
     if (rowsPerPage === "all") return filteredData;
     const start = (currentPage - 1) * Number(rowsPerPage);
     return filteredData.slice(start, start + Number(rowsPerPage));
   }, [filteredData, rowsPerPage, currentPage]);
-
-  const startRow = filteredData.length === 0 ? 0 : rowsPerPage === "all" ? 1 : (currentPage - 1) * Number(rowsPerPage) + 1;
-  const endRow   = filteredData.length === 0 ? 0 : rowsPerPage === "all" ? filteredData.length : Math.min(currentPage * Number(rowsPerPage), filteredData.length);
 
   const rowNum = (index) =>
     rowsPerPage === "all" ? index + 1 : (currentPage - 1) * Number(rowsPerPage) + index + 1;
@@ -177,47 +170,28 @@ export default function DhcpActive() {
   }, [data]);
 
   const [hoverRow, setHoverRow] = useState(null);
+  const [showFilters, setShowFilters] = useState(true);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: NS.font, color: NS.text }}>
       <PageHeader
         title="Active Users"
         subtitle={`${data.length} devices connected (MikroTik DHCP) · updated ${lastUpdate || "—"}${offline.length ? ` · ${offline.length} router offline` : ""}`}
+        actions={
+          <AlertButton okText="Semua router terhubung." items={offline.length ? [{
+            tone: "warn",
+            title: `${offline.map((o) => o.router_name).join(", ")} offline`,
+            body: <>
+              Router can't be reached right now, so users at that site aren't counted. Other routers keep updating — retrying every 5 seconds.
+              {offline.map((o) => (
+                <div key={o.router_id} style={{ marginTop: 4, fontSize: 11.5, color: NS.label, overflowWrap: "anywhere" }}>
+                  <b>{o.router_name}:</b> {o.error}
+                </div>
+              ))}
+            </>,
+          }] : []} />
+        }
       />
-
-      <Panel title="Filter" pad={12}>
-        <div style={{ display: "grid", gap: 12, gridTemplateColumns: isMobile ? "1fr 1fr" : "2fr 1fr 1fr" }}>
-          <div style={{ gridColumn: isMobile ? "1 / -1" : "auto" }}>
-            <Field label="Search">
-              <input
-                type="text"
-                placeholder="IP, MAC, hostname, router…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={fieldStyle}
-              />
-            </Field>
-          </div>
-          <Field label="Router">
-            <select value={routerId} onChange={(e) => setRouterId(e.target.value)} style={fieldStyle}>
-              {routerOptions.map((r) => {
-                const n = r.value === "all" ? null : routerCounts.find((c) => c.name === r.label)?.count;
-                const down = offline.some((o) => String(o.router_id) === r.value);
-                return <option key={r.value} value={r.value}>{r.label}{down ? " (offline)" : n != null ? ` (${n})` : ""}</option>;
-              })}
-            </select>
-          </Field>
-          <Field label="Rows per page">
-            <select value={rowsPerPage} onChange={(e) => setRowsPerPage(e.target.value)} style={fieldStyle}>
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-              <option value="all">All</option>
-            </select>
-          </Field>
-        </div>
-      </Panel>
 
       {error && (
         <Alert tone="bad" title="Failed to load data">
@@ -225,21 +199,26 @@ export default function DhcpActive() {
         </Alert>
       )}
 
-      {offline.length > 0 && (
-        <Alert tone="warn" title={`${offline.map((o) => o.router_name).join(", ")} offline`}>
-          Router can't be reached right now, so users at that site aren't counted. Other routers keep updating — retrying every 5 seconds.
-          {offline.map((o) => (
-            <div key={o.router_id} style={{ marginTop: 4, fontSize: 11.5, color: NS.label, overflowWrap: "anywhere" }}>
-              <b>{o.router_name}:</b> {o.error}
-            </div>
-          ))}
-        </Alert>
-      )}
-
       {loading ? (
-        <Panel pad={24}><div style={{ textAlign: "center", color: NS.label, fontSize: 13 }}>Loading active users…</div></Panel>
+        <div style={{ background: NS.surface, borderRadius: 3, padding: 24, textAlign: "center", color: NS.label, fontSize: 13, boxShadow: NS_SHADOW }}>Loading active users…</div>
       ) : !(error && data.length === 0) && (
-      <Panel title="Active Users List" right={`Total: ${filteredData.length}`}>
+      <div style={listPanel}>
+        <FilterBar open={showFilters} onToggle={() => setShowFilters((v) => !v)}>
+          <FilterField label="Router">
+            <select value={routerId} onChange={(e) => setRouterId(e.target.value)} style={fieldStyle}>
+              {routerOptions.map((r) => {
+                const n = r.value === "all" ? null : routerCounts.find((c) => c.name === r.label)?.count;
+                const down = offline.some((o) => String(o.router_id) === r.value);
+                return <option key={r.value} value={r.value}>{r.label}{down ? " (offline)" : n != null ? ` (${n})` : ""}</option>;
+              })}
+            </select>
+          </FilterField>
+          <FilterField label="Keyword" width={300}>
+            <input type="text" placeholder="IP, MAC, hostname, router…" value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)} style={fieldStyle} />
+          </FilterField>
+        </FilterBar>
+
         {isMobile ? (
           displayedData.length > 0 ? displayedData.map((item, index) => (
             <MItem key={item[".id"] || `${item.address}-${index}`} i={index}
@@ -254,10 +233,14 @@ export default function DhcpActive() {
           )) : <EmptyState />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
               <thead>
                 <tr>
-                  {["#", "Router", "IP Address", "MAC Address", "Hostname", "Server", "Status"].map((h) => <th key={h} style={th}>{h}</th>)}
+                  <SortTh label="#" style={{ width: 44, textAlign: "right" }} />
+                  {COLUMNS.map((c) => (
+                    <SortTh key={c.key} label={c.label} active={sort.key === c.key} dir={sort.dir}
+                      onClick={c.sortable !== false ? () => toggleSort(c.key) : undefined} />
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -266,45 +249,30 @@ export default function DhcpActive() {
                   return (
                     <tr key={rk} onMouseEnter={() => setHoverRow(rk)} onMouseLeave={() => setHoverRow(null)}
                       style={zebraRow(index, hoverRow === rk)}>
-                      <td style={{ ...td, color: NS.label, width: 48 }}>{rowNum(index)}</td>
-                      <td style={td}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                          <Dot color={siteColor(item.router_name)} size={7} />
-                          {item.router_name || "—"}
+                      <td style={{ ...listTd, color: NS.label, textAlign: "right" }}>{rowNum(index)}</td>
+                      <td style={listTd}>{item.router_name || "—"}</td>
+                      <td style={{ ...listTd, color: NS.link }}>{item.address || "—"}</td>
+                      <td style={{ ...listTd, color: NS.label }}>{item["mac-address"] || "—"}</td>
+                      <td style={{ ...listTd, whiteSpace: "normal", overflowWrap: "anywhere" }}>{item["host-name"] || "—"}</td>
+                      <td style={{ ...listTd, color: NS.label }} title={item["expires-after"] || undefined}>{leaseText(item["expires-after"])}</td>
+                      <td style={listTd}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: NS.ok, fontWeight: 600 }}>
+                          <Dot color={NS.ok} size={7} />Connected
                         </span>
                       </td>
-                      <td style={{ ...td, color: NS.link, fontWeight: 600 }}>{item.address || "—"}</td>
-                      <td style={{ ...td, color: NS.label }}>{item["mac-address"] || "—"}</td>
-                      <td style={td}>{item["host-name"] || "—"}</td>
-                      <td style={{ ...td, color: NS.label }}>{item.server || "—"}</td>
-                      <td style={{ ...td, color: NS.ok, fontWeight: 700 }}>Connected</td>
                     </tr>
                   );
                 }) : (
-                  <tr><td colSpan={7} style={{ padding: 0 }}><EmptyState /></td></tr>
+                  <tr><td colSpan={COLUMNS.length + 1} style={{ padding: 0 }}><EmptyState /></td></tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
 
-        {filteredData.length > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: NS.zebra, gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: NS.label }}>
-              Showing <b style={{ color: NS.text }}>{startRow}–{endRow}</b> of <b style={{ color: NS.text }}>{filteredData.length}</b>
-            </span>
-            {rowsPerPage !== "all" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}
-                  style={btn(false, currentPage === 1)}>‹ Previous</button>
-                <span style={{ fontSize: 13, fontWeight: 700, padding: "0 6px" }}>{currentPage} / {totalPages}</span>
-                <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
-                  style={btn(false, currentPage === totalPages)}>Next ›</button>
-              </div>
-            )}
-          </div>
-        )}
-      </Panel>
+        <ListFooter total={filteredData.length} page={currentPage} perPage={rowsPerPage}
+          onPage={setCurrentPage} onPerPage={setRowsPerPage} />
+      </div>
       )}
     </div>
   );

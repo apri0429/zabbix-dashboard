@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API_BASE } from "../api";
 import { Globe01, Clock } from "@untitledui/icons";
-import { BandTitle, MItem, MFacts } from "../components/ns";
+import {
+  PageHeader, Alert, AlertButton, MItem, MFacts, btn, btnClass, fieldStyle, listPanel, listTd as td,
+  FilterBar, FilterField, SortTh, ListFooter,
+} from "../components/ns";
 
 /* ─── Design tokens (gaya NetSuite) ─── */
 const T = {
@@ -119,56 +122,6 @@ function useIsMobile() {
   return m;
 }
 
-/* ─── Komponen kecil gaya NetSuite ─── */
-const btn = (primary) => ({
-  padding: "5px 14px", borderRadius: 3, fontSize: 13, fontWeight: 600, cursor: "pointer",
-  fontFamily: T.font, whiteSpace: "nowrap",
-  border: `1px solid ${primary ? T.primary : "#b2b2b2"}`,
-  background: primary ? T.primary : "#e9e9e9",
-  color: primary ? "#fff" : T.text,
-});
-
-const fieldStyle = {
-  height: 30, padding: "0 8px", borderRadius: 3, border: `1px solid ${T.field}`,
-  fontSize: 13, color: T.text, background: T.surface, outline: "none", fontFamily: T.font, width: "100%",
-};
-
-const Field = ({ label, children }) => (
-  <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-    <span style={{ fontSize: 11, fontWeight: 700, color: T.label, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</span>
-    {children}
-  </label>
-);
-
-const Band = ({ children, right }) => (
-  <div style={{
-    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap",
-    padding: "7px 12px", background: T.band, color: T.bandText, fontSize: 14, fontWeight: 700,
-  }}>
-    <BandTitle>{children}</BandTitle>
-    {right && <span style={{ fontSize: 12, fontWeight: 600 }}>{right}</span>}
-  </div>
-);
-
-const Alert = ({ tone, title, children }) => {
-  const c = { ok: [T.okBg, T.ok, "✓"], bad: [T.badBg, T.bad, "!"], warn: [T.warnBg, T.warn, "!"], info: [T.infoBg, T.primary, "i"] }[tone];
-  return (
-    <div style={{ display: "flex", gap: 12, padding: "12px 14px", background: c[0], borderRadius: 3, fontSize: 13, color: T.text, lineHeight: 1.55 }}>
-      <span style={{
-        flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: c[1], color: "#fff",
-        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800,
-      }}>{c[2]}</span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        {title && <div style={{ fontWeight: 700, fontSize: 14, color: c[1] }}>{title}</div>}
-        {children}
-      </div>
-    </div>
-  );
-};
-
-const th = { padding: "7px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.label, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap", background: T.colHead };
-const td = { padding: "8px 12px", fontSize: 13, color: T.text, verticalAlign: "top" };
-
 /* ─── Page ─── */
 export default function NetworkLog() {
   const isMobile = useIsMobile();
@@ -186,6 +139,7 @@ export default function NetworkLog() {
   const [sort, setSort] = useState("worst");
   const [entityKey, setEntityKey] = useState("all");
   const [showHelp, setShowHelp] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [hoverRow, setHoverRow] = useState(null);
   const [perPage, setPerPage] = useState("10");
   const [page, setPage] = useState(1);
@@ -288,8 +242,6 @@ export default function NetworkLog() {
   const from = (curPage - 1) * size;
   const pageShown = shown.slice(from, from + size);
   const pageIncidents = incidents.slice(from, from + size);
-  const startRow = listLen === 0 ? 0 : from + 1;
-  const endRow = Math.min(from + size, listLen);
 
   const openHistory = (key) => { setEntityKey(key); setView("riwayat"); };
   const exportCsv = () => {
@@ -307,7 +259,55 @@ export default function NetworkLog() {
     downloadCsv(`catatan-jaringan-${days ? `${days}hari` : "minggu-lalu"}.csv`, rows);
   };
 
-  const panel = { background: T.surface, borderRadius: 3, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.08)" };
+  // Peringatan halaman ini (tampil lewat tombol Alert di judul, bukan banner di atas).
+  const alertItems = [];
+  if (kpi.total > 0) {
+    if (kpi.downNow.length === 0) {
+      alertItems.push({
+        tone: "ok", title: "Semua koneksi berjalan normal",
+        body: <>{kpi.online} koneksi dipantau. {rangeLabel}:{" "}
+          {kpi.incidents ? `${kpi.incidents} kali putus, total ${fmtDur(kpi.downSeconds)}.` : "tidak ada yang putus."}</>,
+      });
+    } else {
+      alertItems.push({
+        tone: "bad", title: `${kpi.downNow.length} koneksi sedang mati`,
+        body: <>
+          {kpi.downNow.map((e) => {
+            const since = parseTs(e.state_since);
+            return (
+              <div key={e.key}>
+                <a onClick={() => openHistory(e.key)} style={{ color: T.link, cursor: "pointer", fontWeight: 600 }}>{e.name}</a>
+                {" "}({e.location}): mati sejak pukul {clock(since)}, sudah {sinceNow(since)}.
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 4, color: T.label }}>{rangeLabel}: {kpi.incidents} kali putus, total {fmtDur(kpi.downSeconds)}.</div>
+        </>,
+      });
+    }
+  }
+  if (gaps.length > 0) {
+    alertItems.push({
+      tone: "warn", title: `Pemantauan sempat terhenti ${gaps.length} kali (total ${fmtDur(gapSeconds)})`,
+      body: <>
+        Pada waktu itu tidak ada satu pun perangkat yang terbaca, jadi status semua perangkat tidak diketahui:{" "}
+        {gaps.slice(0, 5).map((g, i) => {
+          const a = parseTs(g.from);
+          return <span key={g.from}>{i ? ", " : ""}{a.getDate()} {BULAN[a.getMonth()]} {clock(a)} ({fmtDur(g.seconds)})</span>;
+        })}{gaps.length > 5 ? ", …" : "."}
+      </>,
+    });
+  }
+  if (lowCoverage) {
+    alertItems.push({
+      tone: "warn", title: "Catatan belum lengkap",
+      body: `Sistem pencatat sempat mati selama ${fmtDur(cov.blackout_seconds)} pada periode ini, jadi gangguan di waktu itu tidak tercatat. Kondisi sebenarnya bisa sedikit lebih buruk dari yang terlihat.`,
+    });
+  }
+
+  const panel = listPanel;
+  // Klik kepala kolom Nama/Lokasi: urut abjad; klik lagi kembali ke "yang bermasalah dulu".
+  const sortBy = (key) => setSort((cur) => (cur === key ? "worst" : key));
   const rowStyle = (i, key, clickable) => ({
     background: hoverRow === key ? T.hover : i % 2 ? T.zebra : T.surface,
     cursor: clickable ? "pointer" : "default",
@@ -315,28 +315,21 @@ export default function NetworkLog() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, color: T.text, fontFamily: T.font }}>
-      {/* ── Judul halaman + tombol ── */}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-        <div>
-          <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 700, letterSpacing: "-0.01em", color: T.text }}>Network Log</div>
-          <div style={{ fontSize: 12, color: T.label, marginTop: 2 }}>
-            {data ? `Updated at ${data.generated_at.slice(11, 16)} · auto-refresh every minute` : "Loading…"}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setShowHelp((v) => !v)} style={btn(false)}>{showHelp ? "Hide Guide" : "Guide"}</button>
-          <button onClick={exportCsv} disabled={!incidents.length}
-            style={{ ...btn(true), opacity: incidents.length ? 1 : 0.5, cursor: incidents.length ? "pointer" : "not-allowed" }}>
-            Download History
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Network Log"
+        subtitle={data ? `Updated at ${data.generated_at.slice(11, 16)} · auto-refresh every minute` : "Loading…"}
+        actions={<>
+          <AlertButton items={data ? alertItems : null} />
+          <button onClick={() => setShowHelp((v) => !v)} className={btnClass(false)} style={btn(false)}>{showHelp ? "Hide Guide" : "Guide"}</button>
+          <button onClick={exportCsv} disabled={!incidents.length} className={btnClass(true)} style={btn(true, !incidents.length)}>Download History</button>
+        </>}
+      />
 
       {error && (
         <Alert tone="bad" title="Data belum bisa dimuat">
           <div>Coba lagi sebentar lagi.</div>
           <div style={{ fontSize: 11.5, color: T.label, marginTop: 2 }}>{error}</div>
-          <button onClick={() => { setLoading(true); load(); }} style={{ ...btn(false), marginTop: 8 }}>Coba lagi</button>
+          <button onClick={() => { setLoading(true); load(); }} className={btnClass(false)} style={{ ...btn(false), marginTop: 8 }}>Coba lagi</button>
         </Alert>
       )}
 
@@ -344,48 +337,6 @@ export default function NetworkLog() {
 
       {data && (
         <>
-          {/* ── Kondisi saat ini ── */}
-          {kpi.total > 0 && (
-            kpi.downNow.length === 0 ? (
-              <Alert tone="ok" title="Semua koneksi berjalan normal">
-                {kpi.online} koneksi dipantau. {rangeLabel}:{" "}
-                {kpi.incidents ? `${kpi.incidents} kali putus, total ${fmtDur(kpi.downSeconds)}.` : "tidak ada yang putus."}
-              </Alert>
-            ) : (
-              <Alert tone="bad" title={`${kpi.downNow.length} koneksi sedang mati`}>
-                {kpi.downNow.map((e) => {
-                  const since = parseTs(e.state_since);
-                  return (
-                    <div key={e.key}>
-                      <a onClick={() => openHistory(e.key)} style={{ color: T.link, cursor: "pointer", fontWeight: 600 }}>{e.name}</a>
-                      {" "}({e.location}): mati sejak pukul {clock(since)}, sudah {sinceNow(since)}.
-                    </div>
-                  );
-                })}
-                <div style={{ marginTop: 4, color: T.label }}>
-                  {rangeLabel}: {kpi.incidents} kali putus, total {fmtDur(kpi.downSeconds)}.
-                </div>
-              </Alert>
-            )
-          )}
-
-          {gaps.length > 0 && (
-            <Alert tone="warn" title={`Pemantauan sempat terhenti ${gaps.length} kali (total ${fmtDur(gapSeconds)})`}>
-              Pada waktu itu tidak ada satu pun perangkat yang terbaca, jadi status semua perangkat tidak diketahui:{" "}
-              {gaps.slice(0, 5).map((g, i) => {
-                const a = parseTs(g.from);
-                return <span key={g.from}>{i ? ", " : ""}{a.getDate()} {BULAN[a.getMonth()]} {clock(a)} ({fmtDur(g.seconds)})</span>;
-              })}{gaps.length > 5 ? ", …" : "."}
-            </Alert>
-          )}
-
-          {lowCoverage && (
-            <Alert tone="warn" title="Catatan belum lengkap">
-              Sistem pencatat sempat mati selama {fmtDur(cov.blackout_seconds)} pada periode ini, jadi gangguan di
-              waktu itu tidak tercatat. Kondisi sebenarnya bisa sedikit lebih buruk dari yang terlihat.
-            </Alert>
-          )}
-
           {showHelp && (
             <Alert tone="info" title="Cara membaca halaman ini">
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
@@ -399,52 +350,39 @@ export default function NetworkLog() {
             </Alert>
           )}
 
-          {/* ── Filter ── */}
+          {/* ── Subtab + daftar ── */}
           <div style={panel}>
-            <Band>Filter</Band>
-            <div style={{
-              display: "grid", gap: 12, padding: 12,
-              gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(5, minmax(0, 1fr))",
-            }}>
-              <Field label="Jenis">
+            <FilterBar open={showFilters} onToggle={() => setShowFilters((v) => !v)}>
+              <FilterField label="Jenis" width={160}>
                 <select value={cat} onChange={(e) => { setCat(e.target.value); setEntityKey("all"); }} style={fieldStyle}>
                   {CATS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
-              </Field>
-              <Field label="Periode">
+              </FilterField>
+              <FilterField label="Periode" width={240}>
                 <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={fieldStyle}>
                   {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
                 </select>
-              </Field>
-              <Field label="Lokasi">
+              </FilterField>
+              <FilterField label="Lokasi">
                 <select value={loc} onChange={(e) => { setLoc(e.target.value); setEntityKey("all"); }} style={fieldStyle}>
                   <option value="all">Semua lokasi</option>
                   {locations.map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
-              </Field>
-              <Field label="Urutkan">
-                <select value={sort} onChange={(e) => setSort(e.target.value)} style={fieldStyle}>
-                  <option value="worst">Yang bermasalah dulu</option>
-                  <option value="name">Nama</option>
-                  <option value="location">Lokasi</option>
-                </select>
-              </Field>
-              <Field label="Cari">
+              </FilterField>
+              <FilterField label="Kata kunci" width={260}>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nama atau lokasi" style={fieldStyle} />
-              </Field>
-            </div>
-          </div>
+              </FilterField>
+            </FilterBar>
 
-          {/* ── Subtab + daftar ── */}
-          <div style={panel}>
-            <div style={{ display: "flex", gap: 2, background: T.band, padding: "6px 6px 0" }}>
+            <div style={{ display: "flex", gap: 2, background: T.band, padding: "6px 6px 0", borderTop: showFilters ? "none" : "1px solid #e3e6eb" }}>
               {VIEWS.map((v) => {
                 const on = view === v.id;
                 return (
                   <button key={v.id} onClick={() => setView(v.id)} style={{
                     padding: "7px 16px", border: "none", borderRadius: "3px 3px 0 0", cursor: "pointer",
                     fontFamily: T.font, fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 7,
-                    background: on ? T.surface : "transparent", color: on ? T.text : T.bandText,
+                    background: on ? T.surface : "transparent", color: on ? "#1c2a3f" : T.bandText,
+                    boxShadow: on ? "inset 0 2px 0 #d9ad5b" : "none",
                   }}><v.Icon width={15} height={15} />{v.label}</button>
                 );
               })}
@@ -479,7 +417,12 @@ export default function NetworkLog() {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                     <thead>
                       <tr>
-                        {["Nama", "Jenis", "Lokasi", "Status", "Kestabilan", "Terakhir putus"].map((h) => <th key={h} style={th}>{h}</th>)}
+                        <SortTh label="Nama" active={sort === "name"} onClick={() => sortBy("name")} />
+                        <SortTh label="Jenis" />
+                        <SortTh label="Lokasi" active={sort === "location"} onClick={() => sortBy("location")} />
+                        <SortTh label="Status" active={sort === "worst"} onClick={() => setSort("worst")} />
+                        <SortTh label="Kestabilan" />
+                        <SortTh label="Terakhir putus" />
                       </tr>
                     </thead>
                     <tbody>
@@ -525,7 +468,7 @@ export default function NetworkLog() {
                 {focus && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", fontSize: 13 }}>
                     <span>Riwayat untuk: <b>{focus.name}</b> <span style={{ color: T.label }}>({focus.location})</span></span>
-                    <button onClick={() => setEntityKey("all")} style={btn(false)}>Tampilkan semua</button>
+                    <button onClick={() => setEntityKey("all")} className={btnClass(false)} style={btn(false)}>Tampilkan semua</button>
                   </div>
                 )}
                 {incidents.length === 0 ? (
@@ -552,7 +495,7 @@ export default function NetworkLog() {
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                       <thead>
                         <tr>
-                          {["Tanggal", "Nama", "Lokasi", "Kejadian", "Mulai", "Selesai", "Lama"].map((h) => <th key={h} style={th}>{h}</th>)}
+                          {["Tanggal", "Nama", "Lokasi", "Kejadian", "Mulai", "Selesai", "Lama"].map((h) => <SortTh key={h} label={h} />)}
                         </tr>
                       </thead>
                       <tbody>
@@ -592,23 +535,9 @@ export default function NetworkLog() {
               </>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: T.zebra, gap: 12, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: T.label }}>
-                Menampilkan <b style={{ color: T.text }}>{startRow}–{endRow}</b> dari <b style={{ color: T.text }}>{listLen}</b> {view === "ringkasan" ? "koneksi" : "kejadian"}
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <select value={perPage} onChange={(e) => setPerPage(e.target.value)} style={{ ...fieldStyle, width: "auto" }} aria-label="Baris per halaman">
-                  {["10", "25", "50", "all"].map((n) => <option key={n} value={n}>{n === "all" ? "Semua" : `${n} baris`}</option>)}
-                </select>
-                {perPage !== "all" && (
-                  <>
-                    <button onClick={() => setPage(Math.max(1, curPage - 1))} disabled={curPage === 1} style={btn(false, curPage === 1)}>‹ Sebelumnya</button>
-                    <span style={{ fontSize: 13, fontWeight: 700, padding: "0 6px" }}>{curPage} / {totalPages}</span>
-                    <button onClick={() => setPage(Math.min(totalPages, curPage + 1))} disabled={curPage === totalPages} style={btn(false, curPage === totalPages)}>Berikutnya ›</button>
-                  </>
-                )}
-              </div>
-            </div>
+            <ListFooter total={listLen} page={curPage} perPage={perPage} onPage={setPage} onPerPage={setPerPage}
+              options={["10", "25", "50"]}
+              text={{ showing: "Menampilkan", of: "dari", show: "Tampil", all: "Semua" }} />
           </div>
         </>
       )}

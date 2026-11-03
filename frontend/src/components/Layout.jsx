@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Menu01, Users01, LogOut01, ArrowUp } from '@untitledui/icons'
+import { Menu01, Users01, LogOut01, ArrowUp, ChevronDown } from '@untitledui/icons'
 import './templateComponents/templateComponents.css'
 import './netsuite.css'
 import logo from './templateComponents/assets/logo-piagam.png'
@@ -28,8 +28,8 @@ function getCurrentPath() {
   return PATH_TO_KEY[path] ? path : defaultPath
 }
 
-// Kerangka gaya NetSuite: bar putih berisi logo & pengguna, lalu bar menu
-// horizontal biru tua. Di HP menu dilipat jadi daftar yang bisa dibuka.
+// Kerangka halaman: bar navy berisi logo & pengguna, lalu bar menu horizontal
+// navy lebih gelap. Di HP menu dilipat jadi daftar yang bisa dibuka.
 export default function Layout({ children, onMenuChange }) {
   const [activePath, setActivePath] = useState(getCurrentPath)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -91,7 +91,7 @@ export default function Layout({ children, onMenuChange }) {
       <header className="ns-top">
         <div className="ns-brand">
           <img src={logo} alt="Logo Piagam" />
-          <span className="ns-brand__name">NetroWatch</span>
+          <span className="ns-brand__name"><b>Netro</b>Watch</span>
         </div>
         <div className="ns-user" onMouseEnter={() => setUserOpen(true)} onMouseLeave={() => setUserOpen(false)}>
           <button
@@ -103,13 +103,14 @@ export default function Layout({ children, onMenuChange }) {
           >
             <Users01 size={20} />
             <span className="ns-usertrigger__text">
-              <span className="ns-usertrigger__name">IT Team</span>
-              <span className="ns-usertrigger__role">NOC Dashboard</span>
+              <span className="ns-usertrigger__name">Network Engineer</span>
+              <span className="ns-usertrigger__role">PT Pilar Niaga Makmur - NOC Dashboard</span>
             </span>
+            <ChevronDown size={16} className="ns-usertrigger__chevron" />
           </button>
           {userOpen && (
             <div className="ns-usermenu" role="menu">
-              <div className="ns-usermenu__who"><b>IT Team</b><span>NOC Dashboard</span></div>
+              <div className="ns-usermenu__who"><b>Network Engineer</b><span>NOC Dashboard</span></div>
               <button type="button" role="menuitem" className="ns-usermenu__item" onClick={() => submitLogout()}>
                 <LogOut01 size={16} /> Sign out
               </button>

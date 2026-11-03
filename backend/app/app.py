@@ -123,18 +123,22 @@ ITEM_MAP = {
     "Mikrotik Duta Garden - INDIHOME": {
         "host": "Mikrotik Duta Garden",
         "recv": [
+            "Interface ether2-INDIBIZ(INDIBIZ): Bits received",
             "Interface ether2-ISP2(INDIBIZ): Bits received"
         ],
         "sent": [
+            "Interface ether2-INDIBIZ(INDIBIZ): Bits sent",
             "Interface ether2-ISP2(INDIBIZ): Bits sent"
         ]
     },
     "Mikrotik Rawa Bokor - BIZNET": {
         "host": "Mikrotik Rawa Bokor",
         "recv": [
+            "Interface ether1-BIZNET(): Bits received",
             "Interface ether1-INTERNET(): Bits received"
         ],
         "sent": [
+            "Interface ether1-BIZNET(): Bits sent",
             "Interface ether1-INTERNET(): Bits sent"
         ]
     },
@@ -150,19 +154,23 @@ ITEM_MAP = {
     "Mikrotik Jatake - INDIHOME": {
         "host": "Mikrotik Jatake",
         "recv": [
+            "Interface ether2-INDIBIZ(ISP INDIBIZ): Bits received",
             "Interface ether2-ISP2(ISP INDIBIZ): Bits received"
         ],
         "sent": [
+            "Interface ether2-INDIBIZ(ISP INDIBIZ): Bits sent",
             "Interface ether2-ISP2(ISP INDIBIZ): Bits sent"
         ]
     },
     "Mikrotik Ks Tubun - INDIHOME": {
         "host": "Mikrotik Ks Tubun",
         "recv": [
+            "Interface ether1-INDIBIZ(Internet ): Bits received",
             "Interface ether1(Internet): Bits received",
             "Interface ether1(Internet ): Bits received"
         ],
         "sent": [
+            "Interface ether1-INDIBIZ(Internet ): Bits sent",
             "Interface ether1(Internet): Bits sent",
             "Interface ether1(Internet ): Bits sent"
         ]
@@ -182,7 +190,7 @@ ITEM_MAP = {
 
 CAPACITY = {
     "Mikrotik Duta Garden - BIZNET": 100,
-    "Mikrotik Duta Garden - INDIHOME": 150,
+    "Mikrotik Duta Garden - INDIHOME": 200,
     "Mikrotik Rawa Bokor - BIZNET": 100,
     "Mikrotik Jatake - BIZNET": 150,
     "Mikrotik Jatake - INDIHOME": 100,
@@ -4573,7 +4581,9 @@ def api_noc_stats(kind: Optional[str] = Query(None, pattern="^(site|device)$"), 
 # ─────────────────────────────────────────────
 
 _CHAT_SYSTEM_PROMPT = (
-    "Kamu asisten NOC untuk jaringan kantor. Jawab dalam Bahasa Indonesia yang singkat "
+    "Kamu 'Asisten AI NOC' untuk jaringan kantor. Jangan menyebut nama model, agent, atau "
+    "produk AI apa pun (termasuk 'Hermes'); kalau ditanya siapa kamu, jawab asisten AI NOC. "
+    "Jawab dalam Bahasa Indonesia yang singkat "
     "dan jelas, langsung ke inti. Gunakan HANYA data dari tool atau ringkasan di bawah; "
     "jangan mengarang angka, perangkat, atau penyebab. Kalau datanya tidak ada, katakan "
     "terus terang. Panggil tool kalau perlu data riwayat, bandwidth, atau detail perangkat.\n\n"
@@ -4745,8 +4755,7 @@ def api_noc_chat_info():
 @app.post("/api/noc/chat")
 def api_noc_chat(req: ChatRequest):
     if not hermes_ai.enabled():
-        raise HTTPException(status_code=503, detail="Chat AI belum aktif: isi HERMES_BASE_URL dan "
-                                                    "HERMES_MODEL di backend/app/.env")
+        raise HTTPException(status_code=503, detail="Chat AI belum aktif. Hubungi admin untuk mengaktifkannya.")
     history = [{"role": m.role, "content": m.content[:CHAT_MAX_CHARS]}
                for m in req.messages if m.role in ("user", "assistant") and m.content.strip()]
     history = history[-CHAT_MAX_HISTORY:]
@@ -4782,7 +4791,7 @@ def api_noc_chat(req: ChatRequest):
                                         _CHAT_TOOLS, _CHAT_HANDLERS)
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=502, detail=f"Gagal menghubungi Hermes: {e}")
+        raise HTTPException(status_code=502, detail=f"Gagal menghubungi asisten AI: {e}")
     return {"success": True, "answer": out["answer"] or "(Model tidak memberi jawaban.)",
             "tools_used": prefetched + out["tools_used"], "model": hermes_ai.HERMES_MODEL}
 
@@ -5564,6 +5573,48 @@ def api_mikrotik_queue_tree(router_id: int | None = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Link ISP yang di Zabbix dibaca dari interface non-fisik (mis. PPPoE) -> port
+# ether fisiknya, supaya Live Bandwidth (yang cuma tampilkan ether) tetap tahu kapasitasnya.
+ISP_PHYSICAL_PORT = {
+    "Mikrotik Jatake - BIZNET": "ether1-BIZNET",
+}
+
+
+def _isp_port_capacity() -> List[Tuple[str, str, str, float]]:
+    """(site, nama interface, label, kapasitas Mbps) tiap port ISP, diturunkan
+    dari ITEM_MAP + CAPACITY. Site = nama host Zabbix tanpa "Mikrotik ", nama
+    interface = teks item Zabbix sebelum "(" (mis. "ether2-ISP2")."""
+    out = []
+    for label, cfg in ITEM_MAP.items():
+        cap = CAPACITY.get(label)
+        if not cap:
+            continue
+        site = cfg.get("host", "").replace("Mikrotik", "", 1).strip().lower()
+        for alias in cfg.get("recv", []):
+            m = re.match(r"Interface\s+([^(:]+)", alias)
+            if m:
+                isp = label.split(" - ")[-1].replace("INDIHOME", "INDIBIZ")
+                out.append((site, m.group(1).strip().lower(), isp, float(cap)))
+        if label in ISP_PHYSICAL_PORT:
+            isp = label.split(" - ")[-1].replace("INDIHOME", "INDIBIZ")
+            out.append((site, ISP_PHYSICAL_PORT[label].lower(), isp, float(cap)))
+    return out
+
+
+def _attach_isp_capacity(rows: List[Dict]) -> None:
+    """Tandai port ether yang tersambung ke ISP dengan `isp_mbps` & `isp_name`,
+    supaya bar Live Bandwidth diukur dari kapasitas langganan, bukan link fisik."""
+    caps = _isp_port_capacity()
+    for row in rows:
+        iface = re.sub(r"-(download|upload)$", "", row.get("name") or "").lower()
+        router = (row.get("router_name") or "").lower()
+        for site, port, isp, cap in caps:
+            if port == iface and site in router:
+                row["isp_mbps"] = cap
+                row["isp_name"] = isp
+                break
+
+
 @app.get("/api/mikrotik/ether-traffic")
 def api_mikrotik_ether_traffic(router_id: int | None = None):
     """Live bandwidth per port Ethernet fisik (RX/TX) — lihat get_ether_traffic.
@@ -5572,6 +5623,7 @@ def api_mikrotik_ether_traffic(router_id: int | None = None):
     try:
         errors = []
         data = get_ether_traffic(router_id, timeout=NOC_NETWATCH_TIMEOUT, errors=errors)
+        _attach_isp_capacity(data)
         return {"success": True, "count": len(data), "data": data, "errors": errors}
     except Exception as e:
         traceback.print_exc()

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE } from "../api";
-import { NS, PageHeader, Panel, Alert, th, td, zebraRow, useIsMobile } from "../components/ns";
+import { NS, PageHeader, Panel, Alert, AlertButton, th, td, zebraRow, useIsMobile } from "../components/ns";
 
 const T = {
   navy:     "#24385b",
@@ -9,13 +9,13 @@ const T = {
   teal:     "#2a9d8f",
   coral:    "#e76f51",
   gold:     "#e9c46a",
-  text:     "#0f2035",
-  textSoft: "#425575",
-  muted:    "#5a6b88",
-  border:   "rgba(26,42,87,0.10)",
-  borderMid:"rgba(26,42,87,0.18)",
+  text:     "#333333",
+  textSoft: "#666666",
+  muted:    "#8a8a8a",
+  border:   "#e3e6eb",
+  borderMid:"#cccccc",
   surface:  "#ffffff",
-  surfaceAlt:"rgba(248,249,250,0.95)",
+  surfaceAlt:"#f5f7fa",
 };
 
 /* ─── Helpers ─── */
@@ -166,17 +166,18 @@ export default function MikrotikStatus() {
       <PageHeader
         title="MikroTik"
         subtitle={`${data.length ? `${onlineCount}/${data.length} routers online · avg CPU ${avgCpu}% · ` : ""}updated ${timeText}${offlineCount ? ` · ${offlineCount} router offline` : ""}`}
+        actions={
+          <AlertButton okText="Semua router online." items={offlineRouters.length ? [{
+            tone: "warn",
+            title: `${offlineRouters.map((r) => r.router_name).join(", ")} offline`,
+            body: "Router can't be reached right now — other routers keep updating. Retrying every 5 seconds.",
+          }] : []} />
+        }
       />
 
       {error && (
         <Alert tone="bad" title="Failed to load data">
           {error}{data.length > 0 && " — showing the last data received, retrying every 5 seconds."}
-        </Alert>
-      )}
-
-      {offlineRouters.length > 0 && (
-        <Alert tone="warn" title={`${offlineRouters.map((r) => r.router_name).join(", ")} offline`}>
-          Router can't be reached right now — other routers keep updating. Retrying every 5 seconds.
         </Alert>
       )}
 

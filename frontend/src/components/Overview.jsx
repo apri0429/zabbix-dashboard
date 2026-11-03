@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Globe01, Server04, Users01, AlertCircle, CheckCircle, Clock, ArrowRight } from "@untitledui/icons";
 import { API_BASE } from "../api";
-import { NS, Panel, Alert, Kpi, MItem, MFacts, btn, th, td, zebraRow, useIsMobile } from "./ns";
+import { NS, Panel, Alert, Kpi, MItem, MFacts, btn, btnClass, listTd as td, SortTh, zebraRow, useIsMobile } from "./ns";
 
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 const pad = (n) => String(n).padStart(2, "0");
@@ -69,7 +69,7 @@ const Empty = ({ children }) => (
   <div style={{ padding: "20px 12px", textAlign: "center", color: NS.label, fontSize: 13 }}>{children}</div>
 );
 
-export default function Overview() {
+export default function Overview({ onAlerts }) {
   const isMobile = useIsMobile();
   const [live, setLive] = useState(null);
   const [net, setNet] = useState(null);
@@ -158,37 +158,49 @@ export default function Overview() {
   const problems = (live?.problems || []).filter((p) => !downNames.has(String(p.host || "").toLowerCase()));
   const issues = downSites.length + downDevices.length + offlineRouters.length + problems.length;
 
+  // Peringatan dikirim ke Dashboard untuk ditampilkan lewat tombol Alert di judul halaman.
+  const alertItems = useMemo(() => {
+    if (!live) return null;
+    if (issues === 0) {
+      return [{
+        tone: "ok", title: "Semua jaringan berjalan normal",
+        body: <>
+          {sc.up}/{sc.total} koneksi internet aktif, {dc.up}/{dc.total} perangkat online, {live.clients_total ?? 0} pengguna terhubung.
+          {week.incidents > 0 && <> Dalam 7 hari terakhir tercatat {week.incidents} kali gangguan (total {fmtDur(week.downSeconds)}).</>}
+        </>,
+      }];
+    }
+    return [{
+      tone: "bad", title: `${issues} masalah perlu perhatian`,
+      body: <>
+        {downSites.map((s) => (
+          <div key={s.label}>Koneksi internet <b>{shortLabel(s.label)}</b> mati{s.since ? ` sejak pukul ${clock(parseTs(s.since))}` : ""}.</div>
+        ))}
+        {offlineRouters.map((r) => <div key={r.router_id}>Router <b>{r.router_name}</b> tidak dapat dihubungi.</div>)}
+        {downDevices.slice(0, 5).map((d) => (
+          <div key={`${d.router_name}-${d.host}`}>
+            Perangkat <b>{d.name}</b> ({d.router_name}) mati{d.since ? ` sejak pukul ${clock(parseTs(d.since))}` : ""}.
+          </div>
+        ))}
+        {downDevices.length > 5 && <div>…dan {downDevices.length - 5} perangkat lain.</div>}
+        {problems.slice(0, 5).map((p) => (
+          <div key={p.eventid}>
+            Peringatan Zabbix ({p.severity_label}): <b>{p.name}</b>{p.host ? ` di ${shortLabel(p.host)}` : ""}.
+          </div>
+        ))}
+        <div style={{ marginTop: 6 }}>
+          <button onClick={() => document.getElementById("perangkat")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className={btnClass(false)} style={btn(false)}>Lihat daftar perangkat</button>
+        </div>
+      </>,
+    }];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, issues, week.incidents, week.downSeconds]);
+
+  useEffect(() => { onAlerts?.(alertItems); }, [alertItems, onAlerts]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* ── Kondisi saat ini ── */}
-      {live && (
-        issues === 0 ? (
-          <Alert tone="ok" title="Semua jaringan berjalan normal">
-            {sc.up}/{sc.total} koneksi internet aktif, {dc.up}/{dc.total} perangkat online, {live.clients_total ?? 0} pengguna terhubung.
-            {week.incidents > 0 && <> Dalam 7 hari terakhir tercatat {week.incidents} kali gangguan (total {fmtDur(week.downSeconds)}).</>}
-          </Alert>
-        ) : (
-          <Alert tone="bad" title={`${issues} masalah perlu perhatian`}>
-            {downSites.map((s) => (
-              <div key={s.label}>Koneksi internet <b>{shortLabel(s.label)}</b> mati{s.since ? ` sejak pukul ${clock(parseTs(s.since))}` : ""}.</div>
-            ))}
-            {offlineRouters.map((r) => <div key={r.router_id}>Router <b>{r.router_name}</b> tidak dapat dihubungi.</div>)}
-            {downDevices.slice(0, 5).map((d) => (
-              <div key={`${d.router_name}-${d.host}`}>
-                Perangkat <b>{d.name}</b> ({d.router_name}) mati{d.since ? ` sejak pukul ${clock(parseTs(d.since))}` : ""}.
-              </div>
-            ))}
-            {downDevices.length > 5 && <div>…dan {downDevices.length - 5} perangkat lain.</div>}
-            {problems.slice(0, 5).map((p) => (
-              <div key={p.eventid}>
-                Peringatan Zabbix ({p.severity_label}): <b>{p.name}</b>{p.host ? ` di ${shortLabel(p.host)}` : ""}.
-              </div>
-            ))}
-            <div style={{ marginTop: 6 }}><button onClick={() => document.getElementById("perangkat")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              style={{ ...btn(false), minHeight: 24, padding: "2px 10px", fontSize: 12 }}>Lihat daftar perangkat</button></div>
-          </Alert>
-        )
-      )}
       {failed.live && !live && (
         <Alert tone="bad" title="Data kondisi jaringan belum bisa dimuat">Pastikan backend berjalan, lalu muat ulang halaman.</Alert>
       )}
@@ -245,7 +257,7 @@ export default function Overview() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                 <thead>
-                  <tr>{["Koneksi", "Status", "Latency", "Pemakaian", "Download / Upload"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["Koneksi", "Status", "Latency", "Pemakaian", "Download / Upload"].map((h) => <SortTh key={h} label={h} />)}</tr>
                 </thead>
                 <tbody>
                   {sites.map((s, i) => (
@@ -288,7 +300,7 @@ export default function Overview() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
                 <thead>
-                  <tr>{["Lokasi", "Router", "CPU", "Perangkat", "Pengguna"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["Lokasi", "Router", "CPU", "Perangkat", "Pengguna"].map((h) => <SortTh key={h} label={h} />)}</tr>
                 </thead>
                 <tbody>
                   {locations.map((l, i) => (
@@ -322,7 +334,7 @@ export default function Overview() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 460 }}>
                 <thead>
-                  <tr>{["Nama", "Lokasi", "Uptime", "Putus", "Total mati"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["Nama", "Lokasi", "Uptime", "Putus", "Total mati"].map((h) => <SortTh key={h} label={h} />)}</tr>
                 </thead>
                 <tbody>
                   {week.worst.map((e, i) => (
@@ -367,7 +379,7 @@ export default function Overview() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                 <thead>
-                  <tr>{["Tanggal", "Nama", "Lokasi", "Mati", "Hidup", "Lama"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["Tanggal", "Nama", "Lokasi", "Mati", "Hidup", "Lama"].map((h) => <SortTh key={h} label={h} />)}</tr>
                 </thead>
                 <tbody>
                   {week.recent.map((x, i) => {
